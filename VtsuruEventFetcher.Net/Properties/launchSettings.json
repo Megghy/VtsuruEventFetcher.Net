@@ -1,0 +1,13 @@
+﻿{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "VtsuruEventFetcher.Net": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development",
+        "VTSURU_TOKEN": "9389607f570eeabc4d0c2049f1a41a3c"
+      }
+    }
+  }
+}
