@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -52,7 +53,7 @@ namespace VtsuruEventFetcher.Net
             AutomaticDecompression = System.Net.DecompressionMethods.All
         })
         {
-
+            Timeout = TimeSpan.FromSeconds(5)
         };
         const string VTSURU_BASE_URL = "https://hongkong.vtsuru.live/api/";
         const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
@@ -141,7 +142,7 @@ namespace VtsuruEventFetcher.Net
 
                 if (resp.code != 200)
                 {
-                    Log($"[HEARTBEAT] 直播场认证信息已过期 {resp.message}");
+                    Log($"[HEARTBEAT] 直播场认证信息已过期: {resp.message}");
                     RestartRoom();
                     return false;
                 }
@@ -211,6 +212,7 @@ namespace VtsuruEventFetcher.Net
             return null;
         }
         static bool isFirst = true;
+        static Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
 
         [UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
         [RequiresDynamicCode("")]
@@ -219,8 +221,12 @@ namespace VtsuruEventFetcher.Net
             var tempEvents = events.Take(20).ToList();
             try
             {
+                if(chatClient is null)
+                {
+                    return false;
+                }
                 var content = new StringContent(JsonConvert.SerializeObject(tempEvents), Encoding.UTF8, "application/json");
-                var response = await client.PostAsync($"{VTSURU_EVENT_URL}update?token={VTSURU_TOKEN}&status={status}", content);
+                var response = await client.PostAsync($"{VTSURU_EVENT_URL}update-v2?token={VTSURU_TOKEN}&status={status}", content);
                 var responseContent = await response.Content.ReadAsStringAsync();
                 var res = JObject.Parse(responseContent);
 
@@ -239,20 +245,31 @@ namespace VtsuruEventFetcher.Net
                             $"弹幕: {tempEvents.Count(e => e.Type == EventDataTypes.Message)}");
                         events.RemoveRange(0, tempEvents.Count);
                     }
-                    if (!string.IsNullOrEmpty(code) && code != res["data"].ToString())
+                    var responseCode = res["data"]["code"].ToString();
+                    if (!string.IsNullOrEmpty(code) && code != responseCode)
                     {
                         Log("[ADD EVENT] 房间号改变, 重新连接");
-                        code = res["data"].ToString();
+                        code = responseCode;
                         RestartRoom();
                     }
-
-                    code = res["data"].ToString();
-
-                    status = "ok";
-
-                    if (chatClient == null)
+                    else
                     {
-                        InitChatClient();
+                        var version = Version.Parse(res["data"]["version"].ToString());
+                        if (version > currentVersion)
+                        {
+                            status = "发现新版本: " + version;
+                        }
+                        else
+                        {
+                            status = "ok";
+                        }
+
+                        code = responseCode;
+
+                        if (chatClient == null)
+                        {
+                            InitChatClient();
+                        }
                     }
 
                     return true;
@@ -308,7 +325,7 @@ namespace VtsuruEventFetcher.Net
                 //m_WebSocketBLiveClient.Connect();
                 //连接长链 带有自动重连
                 WebSocketBLiveClient.Close += (_, _) => RestartRoom();
-                var success = await WebSocketBLiveClient.Connect(TimeSpan.FromSeconds(30));
+                var success = await WebSocketBLiveClient.Connect();
                 if (!success)
                 {
                     throw new("无法连接至房间");
@@ -322,6 +339,10 @@ namespace VtsuruEventFetcher.Net
             catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
+            }
+            finally
+            {
+                isIniting = false;
             }
 
         }

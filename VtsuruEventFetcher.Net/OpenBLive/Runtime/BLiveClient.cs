@@ -22,6 +22,7 @@ namespace OpenBLive.Runtime
     {
         private Timer m_Timer;
         protected string token;
+        private bool m_Disposed = false;
 
         /// <summary>
         /// 弹幕数据
@@ -57,7 +58,7 @@ namespace OpenBLive.Runtime
 
         public event EventHandler Open;
         public event EventHandler Close;
-        public abstract void Connect();
+        public abstract Task<bool> Connect();
         /// <summary>
         /// 带有重连
         /// </summary>
@@ -79,8 +80,12 @@ namespace OpenBLive.Runtime
         }
         protected virtual void OnClose()
         {
-            m_Timer?.Dispose();
-            Close?.Invoke(null, new());
+            if (!m_Disposed)
+            {
+                m_Disposed = true;
+                m_Timer?.Dispose();
+                Close?.Invoke(null, new());
+            }
         }
 #if UNITY_2021_2_OR_NEWER || NET5_0_OR_GREATER
         protected void ProcessPacket(ReadOnlySpan<byte> bytes) =>

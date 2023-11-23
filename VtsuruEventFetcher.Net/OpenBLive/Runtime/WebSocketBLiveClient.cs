@@ -1,10 +1,5 @@
-﻿using System;
-using System.Threading.Tasks;
-using OpenBLive.Runtime.Data;
-using System.Text;
+﻿using OpenBLive.Runtime.Data;
 using OpenBLive.Runtime.Utilities;
-using System.Collections.Generic;
-using System.Linq;
 using OpenBLive.Client.Data;
 
 #if NET5_0_OR_GREATER
@@ -45,7 +40,7 @@ namespace OpenBLive.Runtime
         }
 
 
-        public override async void Connect()
+        public override async Task<bool> Connect()
         {
             var url = WssLink.FirstOrDefault();
             if (string.IsNullOrEmpty(url))
@@ -60,15 +55,24 @@ namespace OpenBLive.Runtime
             ProcessPacket(e.Binary));
             clientWebSocket.DisconnectionHappened.Subscribe(e =>
             {
-                if (e.CloseStatus == WebSocketCloseStatus.Empty)
+                if (e.Type == DisconnectionType.ByUser)
+                {
+                    Console.WriteLine("WS CLOSED BY USER");
+                }
+                else if (e.CloseStatus == WebSocketCloseStatus.Empty)
                     Console.WriteLine("WS CLOSED");
                 else
-                    Console.WriteLine("WS ERROR: " + e.Exception.Message);
+                    Console.WriteLine("WS ERROR: " + e.Exception?.Message);
+                Dispose();
             });
 
             await clientWebSocket.Start();
             if (clientWebSocket.IsStarted)
+            {
                 OnOpen();
+                return true;
+            }
+            return false;
 
 
 #elif UNITY_2020_3_OR_NEWER
@@ -113,7 +117,11 @@ namespace OpenBLive.Runtime
             });
             clientWebSocket.DisconnectionHappened.Subscribe(e =>
             {
-                if (e.CloseStatus == WebSocketCloseStatus.Empty)
+                if (e.Type == DisconnectionType.ByUser)
+                {
+                    Console.WriteLine("WS CLOSED BY USER");
+                }
+                else if (e.CloseStatus == WebSocketCloseStatus.Empty)
                     Console.WriteLine("WS CLOSED");
                 else if (e?.Exception != null)
                     Console.WriteLine("WS ERROR: " + e?.Exception?.Message);
@@ -158,12 +166,15 @@ namespace OpenBLive.Runtime
         public override void Disconnect()
         {
 #if NET5_0_OR_GREATER
-            if(clientWebSocket is not null)
+            if (clientWebSocket is not null)
             {
                 OnClose();
+                if (clientWebSocket?.IsStarted == true)
+                {
+                    clientWebSocket?.Stop(WebSocketCloseStatus.Empty, string.Empty);
+                }
+                clientWebSocket?.Dispose();
             }
-            clientWebSocket?.Stop(WebSocketCloseStatus.Empty, string.Empty);
-            clientWebSocket?.Dispose();
             clientWebSocket = null;
 #elif UNITY_2020_3_OR_NEWER
             ws?.Close();
@@ -188,7 +199,7 @@ namespace OpenBLive.Runtime
             {
                 Logger.LogError(ex.Message);
                 errorCount++;
-                if(errorCount > 5)
+                if (errorCount > 5)
                 {
                     Dispose();
                 }
