@@ -108,7 +108,7 @@ namespace VtsuruEventFetcher.Net
                 .show();*/
         }
         public static string LogPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "logs");
-        static void Log(string msg)
+        public static void Log(string msg)
         {
             try
             {
@@ -202,6 +202,8 @@ namespace VtsuruEventFetcher.Net
                 else
                 {
                     Log("[START ROOM] " + res["message"].ToString());
+
+                    status = "无法开启场次: " + res["message"].ToString();
                 }
             }
             catch (Exception err)
@@ -221,10 +223,6 @@ namespace VtsuruEventFetcher.Net
             var tempEvents = events.Take(20).ToList();
             try
             {
-                if(chatClient is null)
-                {
-                    return false;
-                }
                 var content = new StringContent(JsonConvert.SerializeObject(tempEvents), Encoding.UTF8, "application/json");
                 var response = await client.PostAsync($"{VTSURU_EVENT_URL}update-v2?token={VTSURU_TOKEN}&status={status}", content);
                 var responseContent = await response.Content.ReadAsStringAsync();
@@ -311,7 +309,6 @@ namespace VtsuruEventFetcher.Net
                 while (authInfo == null)
                 {
                     Log("无法开启场次, 10秒后重试");
-                    status = "无法开启场次";
                     await Task.Delay(10000);
                     authInfo ??= await StartRoom();
                 }
