@@ -49,6 +49,9 @@ namespace OpenBLive.Runtime.Data
         /// 房间号
         /// </summary>
         [JsonProperty("room_id")] public long roomID;
+        /// <summary>
+        /// 时间戳
+        /// </summary>
         [JsonProperty("timestamp")] public long timestamp;
     }
 }

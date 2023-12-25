@@ -17,7 +17,9 @@ namespace VtsuruEventFetcher.Net
             Guard,
             SC,
             Gift,
-            Message
+            Message,
+            Like,
+            SCDel
         }
         public class EventModel
         {
@@ -45,6 +47,8 @@ namespace VtsuruEventFetcher.Net
             public string FansMedalName { get; set; }
             [JsonProperty("fans_medal_wearing_status")]
             public bool FansMedalWearingStatus { get; set; }
+            [JsonProperty("emoji")]
+            public string? Emoji { get; set; }
         }
         static string VTSURU_TOKEN;
         static System.Timers.Timer _timer;
@@ -55,7 +59,7 @@ namespace VtsuruEventFetcher.Net
         {
             Timeout = TimeSpan.FromSeconds(5)
         };
-        const string VTSURU_BASE_URL = "https://hongkong.vtsuru.live/api/";
+        const string VTSURU_BASE_URL = "https://failover-api.vtsuru.suki.club/api/";
         const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
 
         static List<EventModel> events = new();
@@ -240,7 +244,8 @@ namespace VtsuruEventFetcher.Net
                             $"舰长: {tempEvents.Count(e => e.Type == EventDataTypes.Guard)}, " +
                             $"SC: {tempEvents.Count(e => e.Type == EventDataTypes.SC)}, " +
                             $"礼物: {tempEvents.Count(e => e.Type == EventDataTypes.Gift)}, " +
-                            $"弹幕: {tempEvents.Count(e => e.Type == EventDataTypes.Message)}");
+                            $"弹幕: {tempEvents.Count(e => e.Type == EventDataTypes.Message)}"+
+                            $"点赞: {tempEvents.Count(e => e.Type == EventDataTypes.Like)}");
                         events.RemoveRange(0, tempEvents.Count);
                     }
                     var responseCode = res["data"]["code"].ToString();
@@ -318,6 +323,8 @@ namespace VtsuruEventFetcher.Net
                 WebSocketBLiveClient.OnGift += WebSocketBLiveClientOnGift;
                 WebSocketBLiveClient.OnGuardBuy += WebSocketBLiveClientOnGuardBuy;
                 WebSocketBLiveClient.OnSuperChat += WebSocketBLiveClientOnSuperChat;
+                WebSocketBLiveClient.OnLike += WebSocketBLiveClientOnLike;
+                WebSocketBLiveClient.OnSuperChatDel += WebSocketBLiveClientOnSCDel;
                 //连接长链  需自己处理重连
                 //m_WebSocketBLiveClient.Connect();
                 //连接长链 带有自动重连
@@ -425,6 +432,34 @@ namespace VtsuruEventFetcher.Net
                 FansMedalLevel = (int)data.fansMedalLevel,
                 FansMedalName = data.fansMedalName,
                 FansMedalWearingStatus = data.fansMedalWearingStatus,
+                Emoji = data.dmType == 1 ? data.emojiImgUrl : null
+            });
+        }
+        private static void WebSocketBLiveClientOnLike(SendLike data)
+        {
+            Log($"[点赞事件] {data.userName}: {data.likeCount}次");
+            events.Add(new()
+            {
+                Type = EventDataTypes.Like,
+                Name = data.userName,
+                UId = data.uid,
+                Price = 0,
+                Msg = data.likeText,
+                Num = data.likeCount,
+                Time = data.timestamp,
+                GuardLevel = (int)data.guardLevel,
+                FansMedalLevel = (int)data.fansMedalLevel,
+                FansMedalName = data.fansMedalName,
+                FansMedalWearingStatus = data.fansMedalWearingStatus,
+            });
+        }
+        private static void WebSocketBLiveClientOnSCDel(SuperChatDel data)
+        {
+            Log($"[SC删除事件] {string.Join(",", data.messageIds)}");
+            events.Add(new()
+            {
+                Type = EventDataTypes.SCDel,
+                Msg = string.Join(",", data.messageIds),
             });
         }
     }

@@ -15,6 +15,7 @@ namespace OpenBLive.Runtime
     public delegate void ReceiveSuperChatEvent(SuperChat e);
 
     public delegate void ReceiveSuperChatDelEvent(SuperChatDel e);
+    public delegate void ReceiveLikeEvent(SendLike e);
 
     public delegate void ReceiveRawNotice(string raw, JsonNode jObject);
 
@@ -45,6 +46,10 @@ namespace OpenBLive.Runtime
         /// SC删除
         /// </summary>
         public event ReceiveSuperChatDelEvent OnSuperChatDel;
+        /// <summary>
+        /// Like
+        /// </summary>
+        public event ReceiveLikeEvent OnLike;
 
         /// <summary>
         /// 原始数据包
@@ -184,6 +189,10 @@ namespace OpenBLive.Runtime
                     case "LIVE_OPEN_PLATFORM_GUARD":
                         var guard = JsonConvert.DeserializeObject<Guard>(data);
                         OnGuardBuy?.Invoke(guard);
+                        break;
+                    case "LIVE_OPEN_PLATFORM_LIKE":
+                        var like = JsonConvert.DeserializeObject<SendLike>(data);
+                        OnLike?.Invoke(like);
                         break;
                 }
             }

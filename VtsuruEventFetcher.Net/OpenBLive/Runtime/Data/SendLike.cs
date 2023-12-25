@@ -1,13 +1,9 @@
-using System;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 
 namespace OpenBLive.Runtime.Data
 {
-    /// <summary>
-    /// 弹幕数据 https://open-live.bilibili.com/doc/2/2/0
-    /// </summary>
     [Serializable]
-    public struct Dm
+    public struct SendLike
     {
         /// <summary>
         /// 用户UID
@@ -31,17 +27,13 @@ namespace OpenBLive.Runtime.Data
 
 
         /// <summary>
-        /// 弹幕内容
+        /// 点赞内容
         /// </summary>
-        [JsonProperty("msg")] public string msg;
+        [JsonProperty("like_text")] public string likeText;
         /// <summary>
-        /// 弹幕类型 0：普通弹幕 1：表情包弹幕
+        /// 点赞数量
         /// </summary>
-        [JsonProperty("dm_type")] public int dmType;
-        /// <summary>
-        /// 表情包地址
-        /// </summary>
-        [JsonProperty("emoji_img_url")] public string emojiImgUrl;
+        [JsonProperty("like_count")] public int likeCount;
 
         /// <summary>
         /// 粉丝勋章等级

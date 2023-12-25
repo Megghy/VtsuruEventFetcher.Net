@@ -46,10 +46,10 @@ namespace OpenBLive.Client
         /// </summary>
         /// <param name="gameIds">开启应用 返回的gameId</param>
         /// <returns></returns>
-        public async Task<EmptyInfo> BatchHeartBeatInteractivePlay(string[] gameIds)
+        public async Task<BatchHeartbeatInfo> BatchHeartBeatInteractivePlay(string[] gameIds)
         {
             var respStr = await BApi.BatchHeartBeatInteractivePlay(gameIds);
-            return JsonConvert.DeserializeObject<EmptyInfo>(respStr);
+            return JsonConvert.DeserializeObject<BatchHeartbeatInfo>(respStr);
         }
     }
 }

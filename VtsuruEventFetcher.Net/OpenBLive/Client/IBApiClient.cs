@@ -38,6 +38,6 @@ namespace OpenBLive.Client
         /// </summary>
         /// <param name="gameIds">开启游戏 返回的gameId</param>
         /// <returns></returns>
-        Task<EmptyInfo> BatchHeartBeatInteractivePlay(string[] gameIds);
+        Task<BatchHeartbeatInfo> BatchHeartBeatInteractivePlay(string[] gameIds);
     }
 }

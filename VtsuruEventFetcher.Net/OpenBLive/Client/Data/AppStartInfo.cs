@@ -1,8 +1,10 @@
-﻿using Newtonsoft.Json;
+﻿using System.Diagnostics.CodeAnalysis;
+using Newtonsoft.Json;
 
 namespace OpenBLive.Client.Data
 {
-    public class AppStartInfo
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public class AppStartInfo()
     {
         /// <summary>
         /// 请求相应 非0为异常case 业务处理
@@ -41,8 +43,8 @@ namespace OpenBLive.Client.Data
     }
 
 
-
-    public class AppStartData
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public class AppStartData()
     {
         /// <summary>
         /// 场次信息
@@ -60,8 +62,8 @@ namespace OpenBLive.Client.Data
         [JsonProperty("anchor_info")]
         public AppStartAnchorInfo AnchorInfo;
     }
-
-    public class AppStartGameInfo
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public class AppStartGameInfo()
     {
         /// <summary>
         /// 场次id,心跳key(心跳保持20s-60s)调用一次,超过60s无心跳自动关闭,长连停止推送消息
@@ -69,7 +71,8 @@ namespace OpenBLive.Client.Data
         [JsonProperty("game_id")]
         public string GameId;
     }
-    public class AppStartWebsocketInfo
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public class AppStartWebsocketInfo()
     {
         /// <summary>
         /// 长连使用的请求json体 第三方无需关注内容,建立长连时使用即可
@@ -83,8 +86,8 @@ namespace OpenBLive.Client.Data
         public List<string> WssLink;
     }
 
-
-    public class AppStartAnchorInfo
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public class AppStartAnchorInfo()
     {
         /// <summary>
         /// 主播房间号
