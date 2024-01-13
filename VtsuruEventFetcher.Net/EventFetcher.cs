@@ -1,107 +1,164 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using OpenBLive.Client.Data;
-using OpenBLive.Runtime;
-using OpenBLive.Runtime.Data;
+using VtsuruEventFetcher.Net.DanmakuClient;
 
 namespace VtsuruEventFetcher.Net
 {
+    public static class ErrorCodes
+    {
+        public const string ACCOUNT_NOT_BIND = "Account.NotBind";
+        public const string ACCOUNT_UNABLE_GET_INFO = "Account.UnableGet";
+
+        public const string OPEN_LIVE_UNABLE_START_GAME = "OpenLive.UnableStart";
+
+        public const string COOKIE_CLIENT_UNABLE_GET_COOKIE = "CookieClient.GetCookie";
+        public const string COOKIE_CLIENT_UNABLE_GET_USER_INFO = "CookieClient.UnableGetInfo";
+
+        public const string NEW_VERSION = "NewVersion";
+    }
     public static partial class EventFetcher
     {
-        public enum EventDataTypes
-        {
-            Guard,
-            SC,
-            Gift,
-            Message,
-            Like,
-            SCDel
-        }
-        public class EventModel
-        {
-            [JsonProperty("type")]
-            public EventDataTypes Type { get; set; }
-            [StringLength(20)]
-            [JsonProperty("name")]
-            public string Name { get; set; }
-            [JsonProperty("uid")]
-            public long UId { get; set; }
-            [StringLength(50)]
-            [JsonProperty("msg")]
-            public string Msg { get; set; }
-            [JsonProperty("time")]
-            public long Time { get; set; }
-            [JsonProperty("num")]
-            public int Num { get; set; }
-            [JsonProperty("price")]
-            public decimal Price { get; set; }
-            [JsonProperty("guard_level")]
-            public int GuardLevel { get; set; }
-            [JsonProperty("fans_medal_level")]
-            public int FansMedalLevel { get; set; }
-            [JsonProperty("fans_medal_name")]
-            public string FansMedalName { get; set; }
-            [JsonProperty("fans_medal_wearing_status")]
-            public bool FansMedalWearingStatus { get; set; }
-            [JsonProperty("emoji")]
-            public string? Emoji { get; set; }
-        }
-        static string VTSURU_TOKEN;
-        static System.Timers.Timer _timer;
-        static HttpClient client = new(new HttpClientHandler()
-        {
-            AutomaticDecompression = System.Net.DecompressionMethods.All
-        })
-        {
-            Timeout = TimeSpan.FromSeconds(5)
-        };
-        const string VTSURU_BASE_URL = "https://failover-api.vtsuru.suki.club/api/";
-        const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
+        static void Log(string msg)
+            => Utils.Log(msg);
 
-        static List<EventModel> events = new();
-        static string status = "ok";
-        static string code = "";
-        static AppStartData authInfo;
-        static WebSocketBLiveClient chatClient;
-        static ILogger<VTsuruEventFetcherWorker> _logger;
+        public static string VTSURU_TOKEN { get; private set; }
+        public static string? COOKIE_CLOUD_KEY { get; private set; }
+        public static string? COOKIE_CLOUD_PASSWORD { get; private set; }
+        public static string? COOKIE_CLOUD_HOST { get; private set; }
+        public static string? BILI_COOKIE { get; private set; }
+
+        public const string VTSURU_BASE_URL = "https://failover-api.vtsuru.suki.club/api/";
+        public const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
+
+        internal static System.Timers.Timer _timer;
+        internal static List<string> _events = [];
+        internal static Dictionary<string, string> Errors = [];
+        internal static ILogger<VTsuruEventFetcherWorker> _logger;
+        internal static IDanmakuClient client;
+        internal static JToken accountInfo;
+        internal static long uId;
+        internal static long roomId;
+        internal static string code;
+
+        public static bool UsingCookie
+            => !string.IsNullOrEmpty(BILI_COOKIE) || (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD));
 
         public static void Init(ILogger<VTsuruEventFetcherWorker> logger)
         {
             _logger = logger;
             VTSURU_TOKEN = Environment.GetEnvironmentVariable("VTSURU_TOKEN") ?? "";
-            if (string.IsNullOrEmpty(VTSURU_TOKEN))
+
+            var tokenPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "token.txt");
+            var configPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "config.json");
+            if (File.Exists(tokenPath))
             {
-                var tokenPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "token.txt");
-                if (File.Exists(tokenPath))
+                var text = File.ReadAllText(tokenPath).Trim();
+                var config = new Config()
                 {
-                    VTSURU_TOKEN = File.ReadAllText(tokenPath).Trim();
+                    Token = text
+                };
+                File.WriteAllText(configPath, JsonConvert.SerializeObject(config, Formatting.Indented));
+                File.Delete(tokenPath);
+                Log($"尝试将token文件转换为json配置文件");
+            }
+            if (File.Exists(configPath))
+            {
+                try
+                {
+                    var config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(configPath));
+                    COOKIE_CLOUD_KEY = config.CookieCloudKey;
+                    COOKIE_CLOUD_PASSWORD = config.CookieCloudPassword;
+                    COOKIE_CLOUD_HOST = config.CookieCloudHost;
+                    BILI_COOKIE = config.Cookie;
+                }
+                catch (Exception ex)
+                {
+                    Log($"读取配置文件失败: {ex}");
+                    Environment.Exit(0);
+                }
+            }
+
+            BILI_COOKIE = Environment.GetEnvironmentVariable("BILI_COOKIE");
+            var cookieCloud = Environment.GetEnvironmentVariable("COOKIE_CLOUD");
+            if (!string.IsNullOrEmpty(cookieCloud))
+            {
+                if (!cookieCloud.Contains('@'))
+                {
+                    _logger.LogError($"无效的 CookieCloud 秘钥, 应为 KEY@PASSWORD (用户key + @ + 端到端加密密码)");
+                    Environment.Exit(0);
+                }
+                else
+                {
+                    COOKIE_CLOUD_KEY = cookieCloud.Split('@')[0];
+                    COOKIE_CLOUD_PASSWORD = cookieCloud.Split('@')[1];
+                }
+            }
+
+            if(!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD))
+            {
+                Log("已设置 CookieCloud, 将从云端获取 Cookie");
+            }
+            else if(!string.IsNullOrEmpty(BILI_COOKIE))
+            {
+                Log("已设置逸站 Cookie, 将使用你的账户连接直播间");
+            }
+            else
+            {
+                Log("未设置 Cookie 或 CookieCloud, 将使用开放平台进行连接");
+            }
+
+            COOKIE_CLOUD_HOST = Environment.GetEnvironmentVariable("COOKIE_CLOUD_HOST");
+            if (!string.IsNullOrEmpty(COOKIE_CLOUD_HOST))
+            {
+                try
+                {
+                    var u = new Uri(COOKIE_CLOUD_HOST);
+                    Log($"已设置 CookieCloud 自定义域名为: {COOKIE_CLOUD_HOST}");
+                }
+                catch
+                {
+                    _logger.LogError($"无效的自定义 CookieCloud Host");
+                    Environment.Exit(0);
                 }
             }
 
             if (string.IsNullOrEmpty(VTSURU_TOKEN))
             {
-                _logger.LogError($"未提供 VTSURU_TOKEN 变量");
+                _logger.LogError($"未提供 Token");
                 Environment.Exit(0);
             }
 
-            Log("token: " + VTSURU_TOKEN);
+            Log("VTsuru Token: " + VTSURU_TOKEN);
 
-            // Starting the Heartbeat
-            _timer = new()
-            {
-                Interval = 20 * 1000,
-                AutoReset = true
-            };
-            _timer.Elapsed += (_, _) => SendHeartbeat();
-            _timer.Start();
-
-            SendEvent();
+            _ = InitChatClientAsync();
+            _ = SendEventAsync();
 
             var port = Environment.GetEnvironmentVariable("PORT");
+            if (!string.IsNullOrEmpty(port))
+            {
+                _ = Task.Run(async () =>
+                {
+                    var listener = new HttpListener();
+                    listener.Prefixes.Add($"http://localhost:{port}/");
+                    listener.Start();
+                    Console.WriteLine("Listening...");
+
+                    while (true)
+                    {
+                        var context = await listener.GetContextAsync();
+                        var response = context.Response;
+                        var responseString = "VTsuruEventFetcher";
+                        var buffer = Encoding.UTF8.GetBytes(responseString);
+                        response.ContentLength64 = buffer.Length;
+                        await response.OutputStream.WriteAsync(buffer);
+                        response.OutputStream.Close();
+                    }
+                });
+            }
         }
         static void SendNotice()
         {
@@ -111,59 +168,11 @@ namespace VtsuruEventFetcher.Net
                 .AddText("你的通知文本")
                 .show();*/
         }
-        public static string LogPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "logs");
-        public static void Log(string msg)
+        public static async Task<bool> GetSelfInfoAsync()
         {
             try
             {
-                if (!Directory.Exists(LogPath))
-                {
-                    Directory.CreateDirectory(LogPath);
-                }
-                var path = Path.Combine(LogPath, $"{DateTime.Now:yyyy-MM-dd}.log");
-                File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss} - {msg}" + Environment.NewLine);
-                Console.WriteLine($"{DateTime.Now:HH:mm:ss} - {msg}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex.Message, ex);
-            }
-        }
-        static async Task<bool> SendHeartbeat()
-        {
-            if (chatClient == null || authInfo == null)
-                return false;
-
-            try
-            {
-                var response = await client.GetAsync(VTSURU_BASE_URL + "open-live/heartbeat-internal?token=" + VTSURU_TOKEN);
-
-                if (!response.IsSuccessStatusCode)
-                    return false;
-
-                string responseBody = await response.Content.ReadAsStringAsync();
-                dynamic resp = JObject.Parse(responseBody);
-
-                if (resp.code != 200)
-                {
-                    Log($"[HEARTBEAT] 直播场认证信息已过期: {resp.message}");
-                    RestartRoom();
-                    return false;
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-
-        }
-        public static async Task<bool> GetSelfInfo()
-        {
-            try
-            {
-                var response = await client.GetAsync($"{VTSURU_BASE_URL}account/self?token={VTSURU_TOKEN}");
+                var response = await Utils.client.GetAsync($"{VTSURU_BASE_URL}account/self?token={VTSURU_TOKEN}");
                 var responseContent = await response.Content.ReadAsStringAsync();
                 var res = JObject.Parse(responseContent);
 
@@ -172,11 +181,18 @@ namespace VtsuruEventFetcher.Net
                     if (res["data"]["biliAuthCode"] == null)
                     {
                         Log("[GET INFO] 你尚未绑定B站账号并填写身份码, 请前往控制面板进行绑定");
-                        status = "未绑定 Bilibili 账号";
+                        Errors.TryAdd(ErrorCodes.ACCOUNT_NOT_BIND, "你尚未绑定B站账号并填写身份码, 请前往控制面板进行绑定");
                         return false;
+                    }
+                    else
+                    {
+                        Errors.Remove(ErrorCodes.ACCOUNT_NOT_BIND);
                     }
                     // Assuming "self" is a variable where you want to store the data.
                     // You might want to parse res["data"] into an appropriate object.
+                    accountInfo = res["data"];
+                    uId = (long)res["data"]["biliId"];
+                    roomId = (long)res["data"]["biliRoomId"];
                     return true;
                 }
                 else
@@ -191,44 +207,22 @@ namespace VtsuruEventFetcher.Net
 
             return false;
         }
-        public static async Task<AppStartData> StartRoom()
-        {
-            try
-            {
-                var response = await client.GetAsync($"{VTSURU_BASE_URL}open-live/start?token={VTSURU_TOKEN}");
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var res = JObject.Parse(responseContent);
-
-                if ((int)res["code"] == 200)
-                {
-                    return JsonConvert.DeserializeObject<AppStartData>(res["data"].ToString());
-                }
-                else
-                {
-                    Log("[START ROOM] " + res["message"].ToString());
-
-                    status = "无法开启场次: " + res["message"].ToString();
-                }
-            }
-            catch (Exception err)
-            {
-                Log(err.Message);
-            }
-
-            return null;
-        }
         static bool isFirst = true;
         static Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+        record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error);
+        public record ResponseEventModelV3(string Code, Version DotnetVersion, int EventCount);
 
         [UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
         [RequiresDynamicCode("")]
-        public static async Task<bool> SendEvent()
+        public static async Task<bool> SendEventAsync()
         {
-            var tempEvents = events.Take(20).ToList();
+            var tempEvents = _events.Take(20).ToList();
             try
             {
-                var content = new StringContent(JsonConvert.SerializeObject(tempEvents), Encoding.UTF8, "application/json");
-                var response = await client.PostAsync($"{VTSURU_EVENT_URL}update-v2?token={VTSURU_TOKEN}&status={status}", content);
+                var content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors)), Encoding.UTF8, "application/json");
+                var response = await Utils.client.PostAsync($"{VTSURU_EVENT_URL}update-v3" +
+                    $"?token={VTSURU_TOKEN}" +
+                    $"&cookie={(client is OpenLiveClient ? "false" : "true")}", content);
                 var responseContent = await response.Content.ReadAsStringAsync();
                 var res = JObject.Parse(responseContent);
 
@@ -240,15 +234,11 @@ namespace VtsuruEventFetcher.Net
                     }
                     if (tempEvents.Count > 0)
                     {
-                        Log($"[ADD EVENT] 已发送 {tempEvents.Count} 条事件: " +
-                            $"舰长: {tempEvents.Count(e => e.Type == EventDataTypes.Guard)}, " +
-                            $"SC: {tempEvents.Count(e => e.Type == EventDataTypes.SC)}, " +
-                            $"礼物: {tempEvents.Count(e => e.Type == EventDataTypes.Gift)}, " +
-                            $"弹幕: {tempEvents.Count(e => e.Type == EventDataTypes.Message)}"+
-                            $"点赞: {tempEvents.Count(e => e.Type == EventDataTypes.Like)}");
-                        events.RemoveRange(0, tempEvents.Count);
+                        Log($"[ADD EVENT] 已发送 {tempEvents.Count} 条事件");
+                        _events.RemoveRange(0, tempEvents.Count);
                     }
-                    var responseCode = res["data"]["code"].ToString();
+                    var resData = JsonConvert.DeserializeObject<ResponseEventModelV3>(res["data"].ToString());
+                    var responseCode = resData.Code;
                     if (!string.IsNullOrEmpty(code) && code != responseCode)
                     {
                         Log("[ADD EVENT] 房间号改变, 重新连接");
@@ -257,21 +247,21 @@ namespace VtsuruEventFetcher.Net
                     }
                     else
                     {
-                        var version = Version.Parse(res["data"]["version"].ToString());
+                        var version = resData.DotnetVersion;
                         if (version > currentVersion)
                         {
-                            status = "发现新版本: " + version;
+                            Errors.TryAdd(ErrorCodes.NEW_VERSION, "发现新版本: " + version);
                         }
                         else
                         {
-                            status = "ok";
+                            Errors.Remove(ErrorCodes.NEW_VERSION);
                         }
 
                         code = responseCode;
 
-                        if (chatClient == null)
+                        if (client is null)
                         {
-                            InitChatClient();
+                            _ = InitChatClientAsync();
                         }
                     }
 
@@ -291,11 +281,11 @@ namespace VtsuruEventFetcher.Net
             finally
             {
                 await Task.Delay(1100); // Wait for 1.1 seconds before calling SendEvent again.
-                await SendEvent();
+                await SendEventAsync();
             }
         }
         static bool isIniting = false;
-        async static Task InitChatClient()
+        async static Task InitChatClientAsync()
         {
             if (isIniting)
             {
@@ -304,41 +294,26 @@ namespace VtsuruEventFetcher.Net
             isIniting = true;
             try
             {
-                while (!(await GetSelfInfo()))
+                while (!(await GetSelfInfoAsync()))
                 {
                     Log("无法获取用户信息, 10秒后重试");
-                    status = "无法获取用户信息";
+                    Errors.TryAdd(ErrorCodes.ACCOUNT_UNABLE_GET_INFO, "无法获取用户信息");
                     await Task.Delay(10000);
                 }
-                authInfo = await StartRoom();
-                while (authInfo == null)
+
+                Errors.Remove(ErrorCodes.ACCOUNT_UNABLE_GET_INFO);
+
+                if (UsingCookie)
                 {
-                    Log("无法开启场次, 10秒后重试");
-                    await Task.Delay(10000);
-                    authInfo ??= await StartRoom();
-                }
-                //创建websocket客户端
-                var WebSocketBLiveClient = new WebSocketBLiveClient(authInfo.WebsocketInfo.WssLink, authInfo.WebsocketInfo.AuthBody);
-                WebSocketBLiveClient.OnDanmaku += WebSocketBLiveClientOnDanmaku;
-                WebSocketBLiveClient.OnGift += WebSocketBLiveClientOnGift;
-                WebSocketBLiveClient.OnGuardBuy += WebSocketBLiveClientOnGuardBuy;
-                WebSocketBLiveClient.OnSuperChat += WebSocketBLiveClientOnSuperChat;
-                WebSocketBLiveClient.OnLike += WebSocketBLiveClientOnLike;
-                WebSocketBLiveClient.OnSuperChatDel += WebSocketBLiveClientOnSCDel;
-                //连接长链  需自己处理重连
-                //m_WebSocketBLiveClient.Connect();
-                //连接长链 带有自动重连
-                WebSocketBLiveClient.Close += (_, _) => RestartRoom();
-                var success = await WebSocketBLiveClient.Connect();
-                if (!success)
-                {
-                    throw new("无法连接至房间");
+                    client = new CookieClient(BILI_COOKIE, COOKIE_CLOUD_KEY, COOKIE_CLOUD_PASSWORD, COOKIE_CLOUD_HOST);
                 }
                 else
                 {
-                    Log($"已连接直播间: {authInfo.AnchorInfo.UName}<{authInfo.AnchorInfo.Uid}>");
-                    chatClient = WebSocketBLiveClient;
+                    client = new OpenLiveClient();
                 }
+                await client.Init();
+
+                await client.Connect();
             }
             catch (Exception ex)
             {
@@ -352,115 +327,13 @@ namespace VtsuruEventFetcher.Net
         }
         static void RestartRoom()
         {
-            chatClient?.Dispose();
-            chatClient = null;
-            _ = InitChatClient();
-        }
-        //绑定醒目留言
-        private static void WebSocketBLiveClientOnSuperChat(SuperChat data)
-        {
-            Log($"[SC事件] {data.userName}<{data.rmb}>: {data.message}");
-            events.Add(new()
-            {
-                Type = EventDataTypes.SC,
-                Name = data.userName,
-                UId = data.uid,
-                Msg = data.message,
-                Price = data.rmb,
-                Num = 1,
-                Time = data.timeStamp,
-                GuardLevel = (int)data.guardLevel,
-                FansMedalLevel = (int)data.fansMedalLevel,
-                FansMedalName = data.fansMedalName,
-                FansMedalWearingStatus = data.fansMedalWearingStatus,
-            });
-        }
-        //绑定大航海信息
-        private static void WebSocketBLiveClientOnGuardBuy(Guard data)
-        {
-            var model = new EventModel()
-            {
-                Type = EventDataTypes.Guard,
-                Name = data.userInfo.userName,
-                UId = data.userInfo.uid,
-                Msg = data.guardLevel == 1 ? "总督" : data.guardLevel == 2 ? "提督" : "舰长",
-                Price = 0,
-                Num = (int)data.guardNum,
-                Time = data.timestamp,
-                GuardLevel = (int)data.guardLevel,
-                FansMedalLevel = (int)data.fansMedalLevel,
-                FansMedalName = data.fansMedalName,
-                FansMedalWearingStatus = data.fansMedalWearingStatus,
-            };
-            events.Add(model);
+            client?.Dispose();
 
-            Log($"[上舰事件] {data.userInfo.userName}: <{model.Msg}> {data.guardNum}{data.guardUnit}");
+            _ = InitChatClientAsync();
         }
-        //绑定礼物信息
-        private static void WebSocketBLiveClientOnGift(SendGift data)
+        public static void AddEvent(string e)
         {
-            Log($"[礼物事件] {data.userName}: {data.giftName}<{data.giftNum}个> ¥{((double)data.price * data.giftNum) / 1000:0.0}");
-            events.Add(new()
-            {
-                Type = EventDataTypes.Gift,
-                Name = data.userName,
-                UId = data.uid,
-                Msg = data.giftName,
-                Price = (decimal)(((double)data.price * data.giftNum) / 1000),
-                Num = (int)data.giftNum,
-                Time = data.timestamp,
-                GuardLevel = (int)data.guardLevel,
-                FansMedalLevel = (int)data.fansMedalLevel,
-                FansMedalName = data.fansMedalName,
-                FansMedalWearingStatus = data.fansMedalWearingStatus,
-            });
-        }
-        //绑定弹幕事件
-        private static void WebSocketBLiveClientOnDanmaku(Dm data)
-        {
-            Log($"[弹幕事件] {data.userName}: {data.msg}");
-            events.Add(new()
-            {
-                Type = EventDataTypes.Message,
-                Name = data.userName,
-                UId = data.uid,
-                Msg = data.msg,
-                Price = 0,
-                Num = 1,
-                Time = data.timestamp,
-                GuardLevel = (int)data.guardLevel,
-                FansMedalLevel = (int)data.fansMedalLevel,
-                FansMedalName = data.fansMedalName,
-                FansMedalWearingStatus = data.fansMedalWearingStatus,
-                Emoji = data.dmType == 1 ? data.emojiImgUrl : null
-            });
-        }
-        private static void WebSocketBLiveClientOnLike(SendLike data)
-        {
-            Log($"[点赞事件] {data.userName}: {data.likeCount}次");
-            events.Add(new()
-            {
-                Type = EventDataTypes.Like,
-                Name = data.userName,
-                UId = data.uid,
-                Price = 0,
-                Msg = data.likeText,
-                Num = data.likeCount,
-                Time = data.timestamp,
-                GuardLevel = (int)data.guardLevel,
-                FansMedalLevel = (int)data.fansMedalLevel,
-                FansMedalName = data.fansMedalName,
-                FansMedalWearingStatus = data.fansMedalWearingStatus,
-            });
-        }
-        private static void WebSocketBLiveClientOnSCDel(SuperChatDel data)
-        {
-            Log($"[SC删除事件] {string.Join(",", data.messageIds)}");
-            events.Add(new()
-            {
-                Type = EventDataTypes.SCDel,
-                Msg = string.Join(",", data.messageIds),
-            });
+            _events.Add(e);
         }
     }
 }

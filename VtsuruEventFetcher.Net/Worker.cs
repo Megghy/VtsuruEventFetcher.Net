@@ -14,7 +14,7 @@ namespace VtsuruEventFetcher.Net
     {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            EventFetcher.Log($"VTsuruEventFetcher 开始运行");
+            Utils.Log($"VTsuruEventFetcher 开始运行");
             EventFetcher.Init(_logger);
             while (!stoppingToken.IsCancellationRequested)
             {
