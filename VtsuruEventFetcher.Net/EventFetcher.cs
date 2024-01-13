@@ -282,7 +282,7 @@ namespace VtsuruEventFetcher.Net
             }
             catch (Exception err)
             {
-                Log("[ADD EVENT] 无法访问后端: " + err.Message);
+                Log("[ADD EVENT] 无法访问后端: " + err);
                 return false;
             }
             finally
