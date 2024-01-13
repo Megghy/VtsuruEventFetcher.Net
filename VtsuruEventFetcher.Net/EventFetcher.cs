@@ -150,7 +150,7 @@ namespace VtsuruEventFetcher.Net
                 _ = Task.Run(async () =>
                 {
                     var listener = new HttpListener();
-                    listener.Prefixes.Add($"http://localhost:{port}/");
+                    listener.Prefixes.Add($"http://*:{port}/");
                     listener.Start();
                     Console.WriteLine($"正在监听端口以通过健康监测: {port}");
 
