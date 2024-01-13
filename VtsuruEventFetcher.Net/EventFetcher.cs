@@ -50,7 +50,6 @@ namespace VtsuruEventFetcher.Net
         public static void Init(ILogger<VTsuruEventFetcherWorker> logger)
         {
             _logger = logger;
-            VTSURU_TOKEN = Environment.GetEnvironmentVariable("VTSURU_TOKEN") ?? "";
 
             var tokenPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "token.txt");
             var configPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "config.json");
@@ -83,9 +82,16 @@ namespace VtsuruEventFetcher.Net
                 }
             }
 
-            BILI_COOKIE = Environment.GetEnvironmentVariable("BILI_COOKIE");
-            var cookieCloud = Environment.GetEnvironmentVariable("COOKIE_CLOUD");
-            if (!string.IsNullOrEmpty(cookieCloud))
+            if(Environment.GetEnvironmentVariable("VTSURU_TOKEN")?.Trim() is { Length: > 0} token)
+            {
+                VTSURU_TOKEN = token;
+            }
+            if(Environment.GetEnvironmentVariable("BILI_COOKIE")?.Trim() is { Length: > 0 } cookie)
+            {
+                BILI_COOKIE = cookie;
+            }
+            
+            if (Environment.GetEnvironmentVariable("COOKIE_CLOUD")?.Trim() is { Length: > 0} cookieCloud)
             {
                 if (!cookieCloud.Contains('@'))
                 {
@@ -112,7 +118,7 @@ namespace VtsuruEventFetcher.Net
                 Log("未设置 Cookie 或 CookieCloud, 将使用开放平台进行连接");
             }
 
-            COOKIE_CLOUD_HOST = Environment.GetEnvironmentVariable("COOKIE_CLOUD_HOST");
+            COOKIE_CLOUD_HOST ??= Environment.GetEnvironmentVariable("COOKIE_CLOUD_HOST")?.Trim();
             if (!string.IsNullOrEmpty(COOKIE_CLOUD_HOST))
             {
                 try
@@ -146,7 +152,7 @@ namespace VtsuruEventFetcher.Net
                     var listener = new HttpListener();
                     listener.Prefixes.Add($"http://localhost:{port}/");
                     listener.Start();
-                    Console.WriteLine("Listening...");
+                    Console.WriteLine($"正在监听端口以通过健康监测: {port}");
 
                     while (true)
                     {
