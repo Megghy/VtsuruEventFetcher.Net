@@ -283,7 +283,7 @@ namespace VtsuruEventFetcher.Net
             }
             catch (JsonReaderException)
             {
-                Log("[ADD EVENT] 错误相应: " + responseContent);
+                Log("[ADD EVENT] 错误响应: " + responseContent);
                 return false;
             }
             catch (Exception err)
