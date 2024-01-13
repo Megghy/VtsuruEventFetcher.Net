@@ -224,13 +224,14 @@ namespace VtsuruEventFetcher.Net
         public static async Task<bool> SendEventAsync()
         {
             var tempEvents = _events.Take(20).ToList();
+            var responseContent = "";
             try
             {
                 var content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors)), Encoding.UTF8, "application/json");
                 var response = await Utils.client.PostAsync($"{VTSURU_EVENT_URL}update-v3" +
                     $"?token={VTSURU_TOKEN}" +
                     $"&cookie={(client is OpenLiveClient ? "false" : "true")}", content);
-                var responseContent = await response.Content.ReadAsStringAsync();
+                responseContent = await response.Content.ReadAsStringAsync();
                 var res = JObject.Parse(responseContent);
 
                 if ((int)res["code"] == 200)
@@ -280,9 +281,14 @@ namespace VtsuruEventFetcher.Net
                     return false;
                 }
             }
+            catch (JsonReaderException)
+            {
+                Log("[ADD EVENT] 错误相应: " + responseContent);
+                return false;
+            }
             catch (Exception err)
             {
-                Log("[ADD EVENT] 无法访问后端: " + err);
+                Log("[ADD EVENT] 无法访问后端: " + err.Message);
                 return false;
             }
             finally
