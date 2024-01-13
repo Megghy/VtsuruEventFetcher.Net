@@ -70,6 +70,7 @@ namespace VtsuruEventFetcher.Net
                 try
                 {
                     var config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(configPath));
+                    VTSURU_TOKEN = config.Token;
                     COOKIE_CLOUD_KEY = config.CookieCloudKey;
                     COOKIE_CLOUD_PASSWORD = config.CookieCloudPassword;
                     COOKIE_CLOUD_HOST = config.CookieCloudHost;
@@ -128,7 +129,7 @@ namespace VtsuruEventFetcher.Net
 
             if (string.IsNullOrEmpty(VTSURU_TOKEN))
             {
-                _logger.LogError($"未提供 Token");
+                Log($"未提供 Token");
                 Environment.Exit(0);
             }
 
