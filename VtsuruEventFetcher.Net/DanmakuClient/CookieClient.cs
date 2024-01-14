@@ -10,7 +10,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         public async Task Connect()
         {
             var danmu = new DanMuCore(DanMuCore.ClientType.Wss, EventFetcher.roomId, EventFetcher.uId, cookie, uId);
-            danmu.ReceiveMessage += Danmu_ReceiveMessage; ;
+            danmu.ReceiveRawMessage += Danmu_ReceiveRawMessage;
             danmu.OnDisconnect += () =>
             {
                 _danmu = null;
@@ -26,12 +26,13 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
         }
 
-        private void Danmu_ReceiveMessage(long roomId, BDanmuLib.Models.MessageType messageType, BDanMuLib.Models.IBaseMessage obj)
+        private bool Danmu_ReceiveRawMessage(long roomId, string msg)
         {
-            if(obj is not null)
+            if (!string.IsNullOrEmpty(msg))
             {
-                EventFetcher.AddEvent(obj.Metadata.ToString());
+                EventFetcher.AddEvent(msg);
             }
+            return true;
         }
 
         public void Dispose()

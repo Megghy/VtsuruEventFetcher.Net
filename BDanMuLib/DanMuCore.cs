@@ -28,6 +28,13 @@ namespace BDanMuLib
     /// <param name="messageType"></param>
     /// <param name="obj"></param>
     public delegate void ReceiveMessage(long roomId, MessageType messageType, IBaseMessage obj);
+    /// <summary>
+    /// 返回handled
+    /// </summary>
+    /// <param name="roomId"></param>
+    /// <param name="msg"></param>
+    /// <returns></returns>
+    public delegate bool ReceiveRawMessage(long roomId, string msg);
 
 
     /// <summary>
@@ -102,6 +109,7 @@ namespace BDanMuLib
         /// 接受消息
         /// </summary>
         public event ReceiveMessage ReceiveMessage;
+        public event ReceiveRawMessage ReceiveRawMessage;
         public event DisconnectDelegate OnDisconnect;
 
         /// <summary>
@@ -723,6 +731,10 @@ namespace BDanMuLib
         }
         private void HandleCmd(string json)
         {
+            if(ReceiveRawMessage?.Invoke(_roomId, json) == true)
+            {
+                return;
+            }
             var danmaku = GetDanmakuFromRawMessage(json);
             var cmd = danmaku.Metadata.Value<string>("cmd");
             if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
