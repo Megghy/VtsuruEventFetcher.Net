@@ -216,18 +216,18 @@ namespace VtsuruEventFetcher.Net
         }
         static bool isFirst = true;
         static Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
-        record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error);
+        record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error, Version currentVersion);
         public record ResponseEventModelV3(string Code, Version DotnetVersion, int EventCount);
 
         [UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
         [RequiresDynamicCode("")]
         public static async Task<bool> SendEventAsync()
         {
-            var tempEvents = _events.Take(20).ToList();
+            var tempEvents = _events.Take(30).ToList();
             var responseContent = "";
             try
             {
-                var content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors)), Encoding.UTF8, "application/json");
+                var content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors, currentVersion)), Encoding.UTF8, "application/json");
                 var response = await Utils.client.PostAsync($"{VTSURU_EVENT_URL}update-v3" +
                     $"?token={VTSURU_TOKEN}" +
                     $"&cookie={(client is OpenLiveClient ? "false" : "true")}", content);
