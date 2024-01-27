@@ -7,21 +7,19 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 {
     public class OpenLiveClient : IDanmakuClient
     {
-        AppStartData authInfo;
-        WebSocketBLiveClient chatClient;
-        System.Timers.Timer _timer;
-        public OpenLiveClient()
-        {
+        bool _isRunning = false;
 
-        }
+        AppStartData _authInfo;
+        WebSocketBLiveClient _chatClient;
+        System.Timers.Timer _timer;
         public async Task Init()
         {
-            authInfo = await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
-            while (authInfo == null)
+            _authInfo = await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
+            while (_authInfo == null)
             {
                 Utils.Log("[OpenLive] 无法开启场次, 10秒后重试");
                 await Task.Delay(10000);
-                authInfo ??= await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
+                _authInfo ??= await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
             }
 
             if (_timer is null)
@@ -40,12 +38,15 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         public async Task Connect()
         {
             //创建websocket客户端
-            var WebSocketBLiveClient = new WebSocketBLiveClient(authInfo.WebsocketInfo.WssLink, authInfo.WebsocketInfo.AuthBody);
+            var WebSocketBLiveClient = new WebSocketBLiveClient(_authInfo.WebsocketInfo.WssLink, _authInfo.WebsocketInfo.AuthBody);
             WebSocketBLiveClient.ReceiveNotice += WebSocketBLiveClient_ReceiveNotice;
             //连接长链  需自己处理重连
             //m_WebSocketBLiveClient.Connect();
             //连接长链 带有自动重连
-            WebSocketBLiveClient.Close += (_, _) => RestartRoom();
+            WebSocketBLiveClient.Close += (_, _) =>
+            {
+                _ = Task.Run(OnClose);
+            };
             var success = await WebSocketBLiveClient.Connect();
             if (!success)
             {
@@ -53,15 +54,46 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             }
             else
             {
-                Utils.Log($"[OpenLive] 已连接直播间: {authInfo.AnchorInfo.UName}<{authInfo.AnchorInfo.Uid}>");
-                chatClient = WebSocketBLiveClient;
+                Utils.Log($"[OpenLive] 已连接直播间: {_authInfo.AnchorInfo.UName}<{_authInfo.AnchorInfo.Uid}>");
+                EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                _chatClient = WebSocketBLiveClient;
+                _isRunning = true;
+            }
+        }
+        private void OnClose()
+        {
+            if (!_isRunning)
+            {
+                return;
+            }
+
+            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"OpenLive弹幕客户端已断开连接");
+
+            _isRunning = false;
+            Dispose();
+
+            Utils.Log($"[OpenLive] 连接断开, 将重新连接");
+            while (true)
+            {
+                try
+                {
+                    _ = Init();
+                    _ = Connect();
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Dispose();
+                    Utils.Log($"[OpenLive] 无法重新连接, 10秒后重试: {ex.Message}");
+                    Thread.Sleep(10000);
+                }
             }
         }
 
         public void Dispose()
         {
-            chatClient?.Dispose();
-            chatClient = null;
+            _chatClient?.Dispose();
+            _chatClient = null;
             _timer?.Dispose();
             _timer = null;
         }
@@ -100,7 +132,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
         async Task<bool> SendHeartbeatAsync()
         {
-            if (chatClient == null || authInfo == null)
+            if (_chatClient == null || _authInfo == null)
                 return false;
 
             try
@@ -130,8 +162,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         }
         void RestartRoom()
         {
-            chatClient?.Dispose();
-            chatClient = null;
+            _chatClient?.Dispose();
+            _chatClient = null;
             _ = Init();
             _ = Connect();
         }

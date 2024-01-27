@@ -6,26 +6,52 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 {
     internal class CookieClient(string? cookie, string? cookieCloudKey, string? cookieCloudPassword, string? cookieCloudHost) : IDanmakuClient
     {
+        bool _isRunning = false;
         DanMuCore _danmu;
         public async Task Connect()
         {
-            var danmu = new DanMuCore(DanMuCore.ClientType.Wss, EventFetcher.roomId, EventFetcher.uId, cookie, uId);
+            var danmu = new DanMuCore(DanMuCore.ClientType.Wss, EventFetcher.roomId, EventFetcher.uId, _cookie, uId);
             danmu.ReceiveRawMessage += Danmu_ReceiveRawMessage;
-            danmu.OnDisconnect += () =>
+            danmu.OnDisconnect += () => _ = Task.Run(OnClose);
+            if (!await danmu.ConnectAsync())
             {
-                _danmu = null;
-                _ = Init();
-                _ = Connect();
-            };
-            while (!(await danmu.ConnectAsync()))
-            {
-                Utils.Log("[CookieClient] 无法连接直播间, 10秒后重试");
-                await Task.Delay(10000);
+                throw new("[CookieClient] 无法连接到直播间");
             }
             _danmu = danmu;
+            _isRunning = true;
+            EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
             Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
         }
+        private void OnClose()
+        {
+            if (!_isRunning)
+            {
+                return;
+            }
 
+            _isRunning = false;
+
+            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"Cookie弹幕客户端已断开连接");
+
+            Dispose();
+
+            Utils.Log($"[CookieClient] 连接断开, 将重新连接");
+            while (true)
+            {
+                try
+                {
+                    _ = Init();
+                    _ = Connect();
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Dispose();
+                    Utils.Log($"[CookieClient] 无法重新连接, 10秒后重试: {ex.Message}");
+                    Thread.Sleep(10000);
+                }
+            }
+        }
         private bool Danmu_ReceiveRawMessage(long roomId, string msg)
         {
             if (!string.IsNullOrEmpty(msg))
@@ -39,34 +65,34 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         {
             _danmu?.Disconnect();
             _danmu = null;
-            updateCookieTimer?.Dispose();
-            updateCookieTimer = null;
+            _updateCookieTimer?.Dispose();
+            _updateCookieTimer = null;
         }
 
 
-        System.Timers.Timer updateCookieTimer;
-        string cookie = cookie;
-        string cookieCloudKey = cookieCloudKey;
-        string cookieCloudPassword = cookieCloudPassword;
-        private readonly string cookieCloudHost = string.IsNullOrEmpty(cookieCloudHost) ? "https://cookie.suki.club/" : cookieCloudHost;
+        System.Timers.Timer _updateCookieTimer;
+        string _cookie = cookie;
+        readonly string _cookieCloudKey = cookieCloudKey;
+        readonly string _cookieCloudPassword = cookieCloudPassword;
+        private readonly string _cookieCloudHost = string.IsNullOrEmpty(cookieCloudHost) ? "https://cookie.suki.club/" : cookieCloudHost;
 
         JToken userInfo;
         long uId;
         public async Task Init()
         {
-            if (updateCookieTimer is null)
+            if (_updateCookieTimer is null)
             {
-                updateCookieTimer = new()
+                _updateCookieTimer = new()
                 {
                     Interval = TimeSpan.FromSeconds(120).TotalMilliseconds,
                     AutoReset = true,
                 };
-                updateCookieTimer.Elapsed += (_, _) =>
+                _updateCookieTimer.Elapsed += (_, _) =>
                 {
                     _ = UpdateCookieAsync();
                     _ = UpdateUserInfoAsync();
                 };
-                updateCookieTimer.Start();
+                _updateCookieTimer.Start();
             }
             while (!(await UpdateCookieAsync()))
             {
@@ -84,13 +110,13 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         {
             try
             {
-                var uri = new Uri(new Uri(cookieCloudHost), $"/get/{cookieCloudKey}");
+                var uri = new Uri(new Uri(_cookieCloudHost), $"/get/{_cookieCloudKey}");
                 var request = new HttpRequestMessage(HttpMethod.Post, uri);
 
                 // 添加要发送的表单数据
                 var postData = new List<KeyValuePair<string, string>>
                 {
-                new("password", cookieCloudPassword),
+                new("password", _cookieCloudPassword),
                 };
 
                 // 创建FormUrlEncodedContent（URL编码的内容）
@@ -109,7 +135,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                         {
                             cookieStringBuilder.AppendFormat("{0}={1}; ", cookie["name"], cookie["value"]);
                         }
-                        cookie = cookieStringBuilder.ToString();
+                        _cookie = cookieStringBuilder.ToString();
                         EventFetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE);
                         return true;
                     }
@@ -137,7 +163,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Get, "https://api.bilibili.com/x/web-interface/nav");
-                request.Headers.Add("Cookie", cookie);
+                request.Headers.Add("Cookie", _cookie);
                 var result = await Utils.client.SendAsync(request);
                 var json = JObject.Parse(await result.Content.ReadAsStringAsync());
                 if (json["code"].Value<int>() == 0)

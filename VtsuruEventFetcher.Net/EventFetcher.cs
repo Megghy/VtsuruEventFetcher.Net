@@ -19,6 +19,8 @@ namespace VtsuruEventFetcher.Net
         public const string COOKIE_CLIENT_UNABLE_GET_USER_INFO = "CookieClient.UnableGetInfo";
 
         public const string NEW_VERSION = "NewVersion";
+
+        public const string CLIENT_DISCONNECTED = "Client.Disconnected";
     }
     public static partial class EventFetcher
     {
@@ -216,7 +218,7 @@ namespace VtsuruEventFetcher.Net
         }
         static bool isFirst = true;
         static Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
-        record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error, Version currentVersion);
+        record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error, Version CurrentVersion);
         public record ResponseEventModelV3(string Code, Version DotnetVersion, int EventCount);
 
         [UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
@@ -324,9 +326,20 @@ namespace VtsuruEventFetcher.Net
                 {
                     client = new OpenLiveClient();
                 }
-                await client.Init();
-
-                await client.Connect();
+                while (true)
+                {
+                    try
+                    {
+                        await client.Init();
+                        await client.Connect();
+                        break;
+                    }
+                    catch(Exception ex)
+                    {
+                        Utils.Log($"无法启动弹幕客户端, 10秒后重试: {ex.Message}");
+                        Thread.Sleep(10000);
+                    }
+                }
             }
             catch (Exception ex)
             {
