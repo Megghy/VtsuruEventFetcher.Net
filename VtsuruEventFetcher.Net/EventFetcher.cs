@@ -21,6 +21,7 @@ namespace VtsuruEventFetcher.Net
         public const string NEW_VERSION = "NewVersion";
 
         public const string CLIENT_DISCONNECTED = "Client.Disconnected";
+        public const string UNABLE_UPLOAD_EVENT = "UnableUploadEvent";
     }
     public static partial class EventFetcher
     {
@@ -221,8 +222,7 @@ namespace VtsuruEventFetcher.Net
         record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error, Version CurrentVersion);
         public record ResponseEventModelV3(string Code, Version DotnetVersion, int EventCount);
 
-        [UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
-        [RequiresDynamicCode("")]
+        static long _addEventErrorCount = 0;
         public static async Task<bool> SendEventAsync()
         {
             var tempEvents = _events.Take(30).ToList();
@@ -274,6 +274,7 @@ namespace VtsuruEventFetcher.Net
                             _ = InitChatClientAsync();
                         }
                     }
+                    _addEventErrorCount = 0;
 
                     return true;
                 }
@@ -286,17 +287,27 @@ namespace VtsuruEventFetcher.Net
             catch (JsonReaderException)
             {
                 Log("[ADD EVENT] 错误响应: " + responseContent);
+                _addEventErrorCount++;
                 return false;
             }
             catch (Exception err)
             {
                 Log("[ADD EVENT] 无法访问后端: " + err.Message);
+                _addEventErrorCount++;
                 return false;
             }
             finally
             {
                 await Task.Delay(1100); // Wait for 1.1 seconds before calling SendEvent again.
                 await SendEventAsync();
+                if(_addEventErrorCount > 10)
+                {
+                    Errors.TryAdd(ErrorCodes.UNABLE_UPLOAD_EVENT, "无法发送事件, 请检查网络情况");
+                }
+                else
+                {
+                    Errors.Remove(ErrorCodes.UNABLE_UPLOAD_EVENT);
+                }
             }
         }
         static bool isIniting = false;
