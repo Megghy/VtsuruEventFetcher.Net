@@ -22,7 +22,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
             Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
         }
-        private void OnClose()
+        private async Task OnClose()
         {
             if (!_isRunning)
             {
@@ -40,8 +40,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             {
                 try
                 {
-                    _ = Init();
-                    _ = Connect();
+                    await Init();
+                    await Connect();
                     break;
                 }
                 catch (Exception ex)
@@ -51,6 +51,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     Thread.Sleep(10000);
                 }
             }
+            Utils.Log($"[CookieClient] 已重新连接");
         }
         private bool Danmu_ReceiveRawMessage(long roomId, string msg)
         {
@@ -80,6 +81,17 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         long uId;
         public async Task Init()
         {
+            while (!(await UpdateCookieAsync()))
+            {
+                Utils.Log("[CookieClient] 无法从 CookieCloud 获取 Cookie, 10秒后重试");
+                await Task.Delay(10000);
+            }
+            Utils.Log("[CookieClient] 已从 CookieCloud 获取 Cookie");
+            while (!(await UpdateUserInfoAsync()))
+            {
+                Utils.Log("[CookieClient] 无法获取用户信息, 10秒后重试");
+                await Task.Delay(10000);
+            }
             if (_updateCookieTimer is null)
             {
                 _updateCookieTimer = new()
@@ -93,17 +105,6 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     _ = UpdateUserInfoAsync();
                 };
                 _updateCookieTimer.Start();
-            }
-            while (!(await UpdateCookieAsync()))
-            {
-                Utils.Log("[CookieClient] 无法从 CookieCloud 获取 Cookie, 10秒后重试");
-                await Task.Delay(10000);
-            }
-            Utils.Log("[CookieClient] 已从 CookieCloud 获取 Cookie");
-            while (!(await UpdateUserInfoAsync()))
-            {
-                Utils.Log("[CookieClient] 无法获取用户信息, 10秒后重试");
-                await Task.Delay(10000);
             }
         }
         public async Task<bool> UpdateCookieAsync()

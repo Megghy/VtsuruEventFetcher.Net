@@ -17,7 +17,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             _authInfo = await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
             while (_authInfo == null)
             {
-                Utils.Log("[OpenLive] 无法开启场次, 10秒后重试");
+                Utils.Log("[OpenLive] 初始化失败, 10秒后重试");
                 await Task.Delay(10000);
                 _authInfo ??= await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
             }
@@ -60,14 +60,14 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 _isRunning = true;
             }
         }
-        private void OnClose()
+        private async Task OnClose()
         {
             if (!_isRunning)
             {
                 return;
             }
 
-            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"OpenLive弹幕客户端已断开连接");
+            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"OpenLive 弹幕客户端已断开连接");
 
             _isRunning = false;
             Dispose();
@@ -77,8 +77,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             {
                 try
                 {
-                    _ = Init();
-                    _ = Connect();
+                    await Init();
+                    await Connect();
                     break;
                 }
                 catch (Exception ex)
@@ -88,6 +88,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     Thread.Sleep(10000);
                 }
             }
+            Utils.Log($"[OpenLive] 已重新连接");
         }
 
         public void Dispose()
@@ -124,7 +125,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             }
             catch (Exception err)
             {
-                Utils.Log(err.Message);
+                Utils.Log("[OpenLive] 无法开启场次: " + err.Message);
             }
 
             return null;
