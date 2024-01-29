@@ -122,7 +122,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
                 // 创建FormUrlEncodedContent（URL编码的内容）
                 request.Content = new FormUrlEncodedContent(postData);
-                var result = await Utils.client.SendAsync(request);
+                var result = await Utils.SendAsync(request);
                 if (result.IsSuccessStatusCode)
                 {
                     var json = JObject.Parse(await result.Content.ReadAsStringAsync());

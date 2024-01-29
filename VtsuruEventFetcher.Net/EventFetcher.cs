@@ -37,6 +37,8 @@ namespace VtsuruEventFetcher.Net
         public const string VTSURU_BASE_URL = "https://failover-api.vtsuru.suki.club/api/";
         public const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
 
+        public static readonly string User_Agent = $"VTsuruEventFetcher/{Assembly.GetExecutingAssembly().GetName().Version} ({Environment.OSVersion})";
+
         internal static System.Timers.Timer _timer;
         internal static List<string> _events = [];
         internal static Dictionary<string, string> Errors = [];
@@ -182,9 +184,8 @@ namespace VtsuruEventFetcher.Net
         {
             try
             {
-                var response = await Utils.client.GetAsync($"{VTSURU_BASE_URL}account/self?token={VTSURU_TOKEN}");
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var res = JObject.Parse(responseContent);
+                var response = await Utils.GetAsync($"{VTSURU_BASE_URL}account/self?token={VTSURU_TOKEN}");
+                var res = JObject.Parse(response);
 
                 if ((int)res["code"] == 200)
                 {
@@ -229,10 +230,13 @@ namespace VtsuruEventFetcher.Net
             var responseContent = "";
             try
             {
-                var content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors, currentVersion)), Encoding.UTF8, "application/json");
-                var response = await Utils.client.PostAsync($"{VTSURU_EVENT_URL}update-v3" +
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{VTSURU_EVENT_URL}update-v3" +
                     $"?token={VTSURU_TOKEN}" +
-                    $"&cookie={(client is OpenLiveClient ? "false" : "true")}", content);
+                    $"&cookie={(client is OpenLiveClient ? "false" : "true")}")
+                {
+                    Content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors, currentVersion)), Encoding.UTF8, "application/json")
+                };
+                var response = await Utils.SendAsync(request);
                 responseContent = await response.Content.ReadAsStringAsync();
                 var res = JObject.Parse(responseContent);
 

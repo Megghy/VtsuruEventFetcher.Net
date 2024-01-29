@@ -16,6 +16,17 @@ namespace VtsuruEventFetcher.Net
             Timeout = TimeSpan.FromSeconds(5)
         };
         public static string LogPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "logs");
+        public static async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
+        {
+            request.Headers.Add("User-Agent", EventFetcher.User_Agent);
+            return await client.SendAsync(request);
+        }
+        public static async Task<string?> GetAsync(string url)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("User-Agent", EventFetcher.User_Agent);
+            return await (await SendAsync(request))?.Content.ReadAsStringAsync();
+        }
         public static void Log(string msg)
         {
             try

@@ -107,9 +107,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         {
             try
             {
-                var response = await Utils.client.GetAsync($"{EventFetcher.VTSURU_BASE_URL}open-live/start?token={token}");
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var res = JObject.Parse(responseContent);
+                var response = await Utils.GetAsync($"{EventFetcher.VTSURU_BASE_URL}open-live/start?token={token}");
+                var res = JObject.Parse(response);
 
                 if ((int)res["code"] == 200)
                 {
@@ -138,13 +137,9 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
             try
             {
-                var response = await Utils.client.GetAsync(EventFetcher.VTSURU_BASE_URL + "open-live/heartbeat-internal?token=" + EventFetcher.VTSURU_TOKEN);
+                var response = await Utils.GetAsync(EventFetcher.VTSURU_BASE_URL + "open-live/heartbeat-internal?token=" + EventFetcher.VTSURU_TOKEN);
 
-                if (!response.IsSuccessStatusCode)
-                    return false;
-
-                string responseBody = await response.Content.ReadAsStringAsync();
-                dynamic resp = JObject.Parse(responseBody);
+                dynamic resp = JObject.Parse(response);
 
                 if (resp.code != 200)
                 {
