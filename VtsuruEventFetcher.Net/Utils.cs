@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace VtsuruEventFetcher.Net
+﻿namespace VtsuruEventFetcher.Net
 {
     internal static class Utils
     {
@@ -18,7 +12,8 @@ namespace VtsuruEventFetcher.Net
         public static string LogPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "logs");
         public static async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
         {
-            request.Headers.Add("User-Agent", EventFetcher.User_Agent);
+            if (!request.Headers.Contains("User-Agent"))
+                request.Headers.Add("User-Agent", EventFetcher.User_Agent);
             return await client.SendAsync(request);
         }
         public static async Task<string?> GetAsync(string url)

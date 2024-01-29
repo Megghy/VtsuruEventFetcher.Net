@@ -37,7 +37,10 @@ namespace VtsuruEventFetcher.Net
         public const string VTSURU_BASE_URL = "https://failover-api.vtsuru.suki.club/api/";
         public const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
 
-        public static readonly string User_Agent = $"VTsuruEventFetcher/{Assembly.GetExecutingAssembly().GetName().Version} ({Environment.OSVersion})";
+        private static readonly string _osInfo = Environment.OSVersion.ToString();
+        private static readonly string _version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
+
+        public static readonly string User_Agent = $"VTsuruEventFetcher/{_version} ({_osInfo}) {(accountInfo is null ? "" : $"{accountInfo["data"]?["name"]}/{uId}")}";
 
         internal static System.Timers.Timer _timer;
         internal static List<string> _events = [];
