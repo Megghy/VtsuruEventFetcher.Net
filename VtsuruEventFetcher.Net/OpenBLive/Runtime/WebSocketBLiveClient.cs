@@ -143,7 +143,7 @@ namespace OpenBLive.Runtime
                 OnClose();
                 if (clientWebSocket?.IsRunning == true)
                 {
-                    clientWebSocket?.Stop(WebSocketCloseStatus.Empty, string.Empty);
+                    _ = (clientWebSocket?.Stop(WebSocketCloseStatus.Empty, string.Empty));
                 }
                 clientWebSocket?.Dispose();
             }

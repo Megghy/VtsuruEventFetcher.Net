@@ -35,29 +35,46 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             }
             
         }
+        bool isConnecting = false;
         public async Task Connect()
         {
-            //创建websocket客户端
-            var WebSocketBLiveClient = new WebSocketBLiveClient(_authInfo.WebsocketInfo.WssLink, _authInfo.WebsocketInfo.AuthBody);
-            WebSocketBLiveClient.ReceiveNotice += WebSocketBLiveClient_ReceiveNotice;
-            //连接长链  需自己处理重连
-            //m_WebSocketBLiveClient.Connect();
-            //连接长链 带有自动重连
-            WebSocketBLiveClient.Close += (_, _) =>
+            if(isConnecting)
             {
-                _ = Task.Run(OnClose);
-            };
-            var success = await WebSocketBLiveClient.Connect();
-            if (!success)
-            {
-                throw new("[OpenLive] 无法连接至房间");
+                return;
             }
-            else
+            isConnecting = true;
+            //创建websocket客户端
+            try
             {
-                Utils.Log($"[OpenLive] 已连接直播间: {_authInfo.AnchorInfo.UName}<{_authInfo.AnchorInfo.Uid}>");
-                EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
-                _chatClient = WebSocketBLiveClient;
-                _isRunning = true;
+                var WebSocketBLiveClient = new WebSocketBLiveClient(_authInfo.WebsocketInfo.WssLink, _authInfo.WebsocketInfo.AuthBody);
+                WebSocketBLiveClient.ReceiveNotice += WebSocketBLiveClient_ReceiveNotice;
+                //连接长链  需自己处理重连
+                //m_WebSocketBLiveClient.Connect();
+                //连接长链 带有自动重连
+                WebSocketBLiveClient.Close += (_, _) =>
+                {
+                    _ = Task.Run(OnClose);
+                };
+                var success = await WebSocketBLiveClient.Connect();
+                if (!success)
+                {
+                    throw new("[OpenLive] 无法连接至房间");
+                }
+                else
+                {
+                    Utils.Log($"[OpenLive] 已连接直播间: {_authInfo.AnchorInfo.UName}<{_authInfo.AnchorInfo.Uid}>");
+                    EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                    _chatClient = WebSocketBLiveClient;
+                    _isRunning = true;
+                }
+            }
+            catch(Exception ex)
+            {
+                Console.WriteLine(ex);
+            }
+            finally
+            {
+                isConnecting = false;
             }
         }
         private async Task OnClose()
@@ -107,7 +124,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         {
             try
             {
-                var response = await Utils.GetAsync($"{EventFetcher.VTSURU_BASE_URL}open-live/start?token={token}");
+                var response = await Utils.GetAsync($"{EventFetcher.VTSURU_API_URL}open-live/start?token={token}");
                 var res = JObject.Parse(response);
 
                 if ((int)res["code"] == 200)
@@ -137,7 +154,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
             try
             {
-                var response = await Utils.GetAsync(EventFetcher.VTSURU_BASE_URL + "open-live/heartbeat-internal?token=" + EventFetcher.VTSURU_TOKEN);
+                var response = await Utils.GetAsync(EventFetcher.VTSURU_API_URL + "open-live/heartbeat-internal?token=" + EventFetcher.VTSURU_TOKEN);
 
                 dynamic resp = JObject.Parse(response);
 

@@ -1,7 +1,9 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System.IO.Compression;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using MessagePack;
+using Microsoft.AspNetCore.SignalR.Client;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using VtsuruEventFetcher.Net.DanmakuClient;
@@ -22,6 +24,7 @@ namespace VtsuruEventFetcher.Net
 
         public const string CLIENT_DISCONNECTED = "Client.Disconnected";
         public const string UNABLE_UPLOAD_EVENT = "UnableUploadEvent";
+        public const string UNABLE_CONNECTTOHUB = "UnableConnectToHub";
     }
     public static partial class EventFetcher
     {
@@ -34,8 +37,41 @@ namespace VtsuruEventFetcher.Net
         public static string? COOKIE_CLOUD_HOST { get; private set; }
         public static string? BILI_COOKIE { get; private set; }
 
-        public const string VTSURU_BASE_URL = "https://failover-api.vtsuru.suki.club/api/";
-        public const string VTSURU_EVENT_URL = VTSURU_BASE_URL + "event/";
+        public const string VTSURU_DEFAULT_URL = "https://vtsuru.suki.club/";
+        public const string VTSURU_FAILOVER_URL = "https://failover-api.vtsuru.suki.club/";
+
+        private static int failUseCount = 0;
+        public static string VTSURU_URL
+        {
+            get
+            {
+                if (failUseCount > 0)
+                {
+                    failUseCount--;
+                    if (failUseCount == 0)
+                    {
+                        Log($"[VTSURU] 将再次尝试连接主服务器");
+                    }
+                    return VTSURU_FAILOVER_URL;
+                }
+                else
+                {
+                    return VTSURU_DEFAULT_URL;
+                }
+            }
+        }
+        private static void OnFail()
+        {
+            if (failUseCount <= 0)
+            {
+                Log("[VTSURU] 无法连接到 VTSURU, 切换至备用服务器");
+            }
+            failUseCount = 3;
+        }
+
+        public static string VTSURU_API_URL => VTSURU_URL + "api/";
+        public static string VTSURU_HUB_URL => VTSURU_URL + "hub/";
+        public static string VTSURU_EVENT_URL => VTSURU_API_URL + "event/";
 
         private static readonly string _osInfo = Environment.OSVersion.ToString();
         private static readonly string _version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
@@ -46,11 +82,16 @@ namespace VtsuruEventFetcher.Net
         internal static List<string> _events = [];
         internal static Dictionary<string, string> Errors = [];
         internal static ILogger<VTsuruEventFetcherWorker> _logger;
-        internal static IDanmakuClient client;
+        internal static HubConnection _hub;
+        internal static IDanmakuClient _client;
+
+        internal static DateTime lastUploadEvent = DateTime.MinValue;
+        internal static TimeSpan uploadIntervalWhenEmpty = TimeSpan.FromMinutes(1);
         internal static JToken accountInfo;
         internal static long uId;
         internal static long roomId;
         internal static string code;
+
 
         public static bool UsingCookie
             => !string.IsNullOrEmpty(BILI_COOKIE) || (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD));
@@ -90,16 +131,16 @@ namespace VtsuruEventFetcher.Net
                 }
             }
 
-            if(Environment.GetEnvironmentVariable("VTSURU_TOKEN")?.Trim() is { Length: > 0} token)
+            if (Environment.GetEnvironmentVariable("VTSURU_TOKEN")?.Trim() is { Length: > 0 } token)
             {
                 VTSURU_TOKEN = token;
             }
-            if(Environment.GetEnvironmentVariable("BILI_COOKIE")?.Trim() is { Length: > 0 } cookie)
+            if (Environment.GetEnvironmentVariable("BILI_COOKIE")?.Trim() is { Length: > 0 } cookie)
             {
                 BILI_COOKIE = cookie;
             }
-            
-            if (Environment.GetEnvironmentVariable("COOKIE_CLOUD")?.Trim() is { Length: > 0} cookieCloud)
+
+            if (Environment.GetEnvironmentVariable("COOKIE_CLOUD")?.Trim() is { Length: > 0 } cookieCloud)
             {
                 if (!cookieCloud.Contains('@'))
                 {
@@ -113,11 +154,11 @@ namespace VtsuruEventFetcher.Net
                 }
             }
 
-            if(!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD))
+            if (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD))
             {
                 Log("已设置 CookieCloud, 将从云端获取 Cookie");
             }
-            else if(!string.IsNullOrEmpty(BILI_COOKIE))
+            else if (!string.IsNullOrEmpty(BILI_COOKIE))
             {
                 Log("已设置逸站 Cookie, 将使用你的账户连接直播间");
             }
@@ -150,7 +191,21 @@ namespace VtsuruEventFetcher.Net
             Log("VTsuru Token: " + VTSURU_TOKEN);
 
             _ = InitChatClientAsync();
-            _ = SendEventAsync();
+            _ = ConnectHub();
+            var timer = new System.Timers.Timer()
+            {
+                AutoReset = true,
+                Interval = 1000,
+            };
+            timer.Elapsed += (e, args) =>
+            {
+                if(_events.Count > 0 || DateTime.Now - lastUploadEvent > uploadIntervalWhenEmpty)
+                {
+                    _ = SendEventAsync();
+                    lastUploadEvent = DateTime.Now;
+                }
+            };
+            timer.Start();
 
             var port = Environment.GetEnvironmentVariable("PORT");
             if (!string.IsNullOrEmpty(port))
@@ -187,7 +242,7 @@ namespace VtsuruEventFetcher.Net
         {
             try
             {
-                var response = await Utils.GetAsync($"{VTSURU_BASE_URL}account/self?token={VTSURU_TOKEN}");
+                var response = await Utils.GetAsync($"{VTSURU_API_URL}account/self?token={VTSURU_TOKEN}");
                 var res = JObject.Parse(response);
 
                 if ((int)res["code"] == 200)
@@ -216,46 +271,114 @@ namespace VtsuruEventFetcher.Net
             }
             catch (Exception err)
             {
+                OnFail();
                 Log(err.Message);
             }
 
             return false;
         }
         static bool isFirst = true;
-        static Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+        static bool isDisconnectByServer = false;
+        static readonly Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
         record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error, Version CurrentVersion);
         public record ResponseEventModelV3(string Code, Version DotnetVersion, int EventCount);
 
         static long _addEventErrorCount = 0;
+        static bool isConnectingHub = false;
+        private static async Task ConnectHub()
+        {
+            if (isConnectingHub)
+            {
+                return;
+            }
+            isConnectingHub = true;
+            var connection = new HubConnectionBuilder()
+                .WithUrl(VTSURU_HUB_URL + $"event-fetcher?token={VTSURU_TOKEN}")
+                .WithAutomaticReconnect()
+                .AddMessagePackProtocol()
+                .Build();
+
+            connection.Closed += (error) => _ = OnHubClosed(error);
+            connection.On("Disconnect", async (string e) =>
+            {
+                isDisconnectByServer = true;
+                Log($"被服务端断开连接: {e}, 为保证可用性将于30s后再次尝试连接");
+                await Task.Delay(30000);
+                _ = ConnectHub();
+            });
+
+            while (true)
+            {
+                try
+                {
+                    await connection.StartAsync();
+                    _hub = connection;
+                    isDisconnectByServer = false;
+                    Log($"已连接至 VTsuru 服务器");
+
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log(ex.ToString());
+                    Errors.TryAdd(ErrorCodes.UNABLE_CONNECTTOHUB, $"无法连接至 VTsuru 服务器");
+                }
+            }
+            isConnectingHub = false;
+            Errors.Remove(ErrorCodes.UNABLE_CONNECTTOHUB);
+        }
+        async static Task OnHubClosed(Exception error)
+        {
+            if (isDisconnectByServer)
+            {
+                return;
+            }
+            _hub = null;
+            Log($"与服务器的连接断开, 正在重连: {error.Message}");
+            OnFail();
+            await Task.Delay(new Random().Next(0, 5) * 1000);
+            await ConnectHub();
+        }
+        static bool isUploading = false;
+        [MessagePackObject(keyAsPropertyName: true)]
+        public record RequestUploadEvents(string[] Events, Dictionary<string, string> Error, Version? CurrentVersion, string OSInfo, bool UseCookie);
+        [MessagePackObject(keyAsPropertyName: true)]
+        public record ResponseUploadEvents(bool Success, string Message, Version Version, int EventCount);
         public static async Task<bool> SendEventAsync()
         {
-            var tempEvents = _events.Take(30).ToList();
-            var responseContent = "";
+            if (_hub is null || isUploading)
+            {
+                return false;
+            }
+            isUploading = true;
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Post, $"{VTSURU_EVENT_URL}update-v3" +
-                    $"?token={VTSURU_TOKEN}" +
-                    $"&cookie={(client is OpenLiveClient ? "false" : "true")}")
-                {
-                    Content = new StringContent(JsonConvert.SerializeObject(new SendEventModel(tempEvents, Errors, currentVersion)), Encoding.UTF8, "application/json")
-                };
-                var response = await Utils.SendAsync(request);
-                responseContent = await response.Content.ReadAsStringAsync();
-                var res = JObject.Parse(responseContent);
+                var tempEvents = _events.Take(30).ToArray();
+                var model = new RequestUploadEvents(tempEvents, Errors, currentVersion, _osInfo, UsingCookie);
 
-                if ((int)res["code"] == 200)
+                var messagePackData = MessagePackSerializer.Serialize(model);
+
+                // 使用Brotli进行压缩
+                using var compressedData = new MemoryStream();
+                using var compressor = new BrotliStream(compressedData, CompressionMode.Compress);
+                await compressor.WriteAsync(messagePackData);
+                await compressor.FlushAsync();
+                var data = compressedData.ToArray();
+
+                var resp = await _hub?.InvokeAsync<ResponseUploadEvents>("UploadEvents", data);
+
+                if (resp.Success)
                 {
                     if (isFirst)
                     {
                         isFirst = false;
                     }
-                    if (tempEvents.Count > 0)
+                    if (tempEvents.Length > 0)
                     {
-                        Log($"[ADD EVENT] 已发送 {tempEvents.Count} 条事件");
-                        _events.RemoveRange(0, tempEvents.Count);
+                        Log($"[ADD EVENT] 已发送 {tempEvents.Length} 条事件");
+                        _events.RemoveRange(0, tempEvents.Length);
                     }
-                    var resData = JsonConvert.DeserializeObject<ResponseEventModelV3>(res["data"].ToString());
-                    var responseCode = resData.Code;
+                    var responseCode = resp.Message;
                     if (!string.IsNullOrEmpty(code) && code != responseCode)
                     {
                         Log("[ADD EVENT] 房间号改变, 重新连接");
@@ -264,7 +387,7 @@ namespace VtsuruEventFetcher.Net
                     }
                     else
                     {
-                        var version = resData.DotnetVersion;
+                        var version = resp.Version;
                         if (version > currentVersion)
                         {
                             Errors.TryAdd(ErrorCodes.NEW_VERSION, "发现新版本: " + version);
@@ -276,7 +399,7 @@ namespace VtsuruEventFetcher.Net
 
                         code = responseCode;
 
-                        if (client is null)
+                        if (_client is null)
                         {
                             _ = InitChatClientAsync();
                         }
@@ -287,27 +410,19 @@ namespace VtsuruEventFetcher.Net
                 }
                 else
                 {
-                    Log($"[ADD EVENT] 失败: {res["message"]}");
+                    Log($"[ADD EVENT] 失败: {resp.Message}");
                     return false;
                 }
             }
-            catch (JsonReaderException)
-            {
-                Log("[ADD EVENT] 错误响应: " + responseContent);
-                _addEventErrorCount++;
-                return false;
-            }
             catch (Exception err)
             {
-                Log("[ADD EVENT] 无法访问后端: " + err.Message);
+                Log("[ADD EVENT] 上传事件失败: " + err.Message);
                 _addEventErrorCount++;
                 return false;
             }
             finally
             {
-                await Task.Delay(1100); // Wait for 1.1 seconds before calling SendEvent again.
-                await SendEventAsync();
-                if(_addEventErrorCount > 10)
+                if (_addEventErrorCount > 5)
                 {
                     Errors.TryAdd(ErrorCodes.UNABLE_UPLOAD_EVENT, "无法发送事件, 请检查网络情况");
                 }
@@ -315,6 +430,7 @@ namespace VtsuruEventFetcher.Net
                 {
                     Errors.Remove(ErrorCodes.UNABLE_UPLOAD_EVENT);
                 }
+                isUploading = false;
             }
         }
         static bool isIniting = false;
@@ -338,21 +454,21 @@ namespace VtsuruEventFetcher.Net
 
                 if (UsingCookie)
                 {
-                    client = new CookieClient(BILI_COOKIE, COOKIE_CLOUD_KEY, COOKIE_CLOUD_PASSWORD, COOKIE_CLOUD_HOST);
+                    _client = new CookieClient(BILI_COOKIE, COOKIE_CLOUD_KEY, COOKIE_CLOUD_PASSWORD, COOKIE_CLOUD_HOST);
                 }
                 else
                 {
-                    client = new OpenLiveClient();
+                    _client = new OpenLiveClient();
                 }
                 while (true)
                 {
                     try
                     {
-                        await client.Init();
-                        await client.Connect();
+                        await _client.Init();
+                        await _client.Connect();
                         break;
                     }
-                    catch(Exception ex)
+                    catch (Exception ex)
                     {
                         Utils.Log($"无法启动弹幕客户端, 10秒后重试: {ex.Message}");
                         Thread.Sleep(10000);
@@ -371,7 +487,7 @@ namespace VtsuruEventFetcher.Net
         }
         static void RestartRoom()
         {
-            client?.Dispose();
+            _client?.Dispose();
 
             _ = InitChatClientAsync();
         }

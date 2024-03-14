@@ -8,19 +8,36 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
     {
         bool _isRunning = false;
         DanMuCore _danmu;
+        bool isConnecting = false;
         public async Task Connect()
         {
-            var danmu = new DanMuCore(DanMuCore.ClientType.Wss, EventFetcher.roomId, EventFetcher.uId, _cookie, uId);
-            danmu.ReceiveRawMessage += Danmu_ReceiveRawMessage;
-            danmu.OnDisconnect += () => _ = Task.Run(OnClose);
-            if (!await danmu.ConnectAsync())
+            if (isConnecting)
             {
-                throw new("[CookieClient] 无法连接到直播间");
+                return;
             }
-            _danmu = danmu;
-            _isRunning = true;
-            EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
-            Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
+            isConnecting = true;
+            try
+            {
+                var danmu = new DanMuCore(DanMuCore.ClientType.Wss, EventFetcher.roomId, EventFetcher.uId, _cookie, uId);
+                danmu.ReceiveRawMessage += Danmu_ReceiveRawMessage;
+                danmu.OnDisconnect += () => _ = Task.Run(OnClose);
+                if (!await danmu.ConnectAsync())
+                {
+                    throw new("[CookieClient] 无法连接到直播间");
+                }
+                _danmu = danmu;
+                _isRunning = true;
+                EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
+            }
+            catch(Exception ex)
+            {
+                Utils.Log(ex.ToString());
+            }
+            finally
+            {
+                isConnecting = false;
+            }
         }
         private async Task OnClose()
         {
