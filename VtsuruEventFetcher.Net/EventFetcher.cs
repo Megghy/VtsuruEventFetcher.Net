@@ -346,7 +346,7 @@ namespace VtsuruEventFetcher.Net
         public record ResponseUploadEvents(bool Success, string Message, Version Version, int EventCount);
         public static async Task<bool> SendEventAsync()
         {
-            if (_hub is null || isUploading)
+            if (_hub is null || _hub.State is not HubConnectionState.Connected || isUploading)
             {
                 return false;
             }
