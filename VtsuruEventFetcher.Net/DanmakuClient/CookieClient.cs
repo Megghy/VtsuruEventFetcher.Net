@@ -23,20 +23,23 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 danmu.OnDisconnect += () => _ = Task.Run(OnClose);
                 if (!await danmu.ConnectAsync())
                 {
+                    isConnecting = false;
                     throw new("[CookieClient] 无法连接到直播间");
                 }
                 _danmu = danmu;
                 _isRunning = true;
                 EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
                 Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
+                isConnecting = false;
             }
-            catch(Exception ex)
+            catch
             {
-                Utils.Log(ex.ToString());
+                isConnecting = false;
+                throw;
             }
             finally
             {
-                isConnecting = false;
+                isConnecting = false; //保险一点
             }
         }
         private async Task OnClose()
@@ -48,7 +51,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
             _isRunning = false;
 
-            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"Cookie弹幕客户端已断开连接");
+            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"Cookie 弹幕客户端已断开连接");
 
             Dispose();
 
@@ -166,7 +169,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 else
                 {
                     Utils.Log($"[CookieClient] 无法获取 Cookie: {result.StatusCode}");
-                    EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, "[CookieClient] 无法获取 Cookie: {result.StatusCode}");
+                    EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, $"[CookieClient] 无法获取 Cookie: {result.StatusCode}");
                 }
             }
             catch (Exception ex)

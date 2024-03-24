@@ -30,15 +30,15 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     Interval = 20 * 1000,
                     AutoReset = true
                 };
-                _timer.Elapsed += (_, _) => _ =  SendHeartbeatAsync();
+                _timer.Elapsed += (_, _) => _ = SendHeartbeatAsync();
                 _timer.Start();
             }
-            
+
         }
         bool isConnecting = false;
         public async Task Connect()
         {
-            if(isConnecting)
+            if (isConnecting)
             {
                 return;
             }
@@ -58,6 +58,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 var success = await WebSocketBLiveClient.Connect();
                 if (!success)
                 {
+                    isConnecting = false;
                     throw new("[OpenLive] 无法连接至房间");
                 }
                 else
@@ -66,15 +67,17 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
                     _chatClient = WebSocketBLiveClient;
                     _isRunning = true;
+                    isConnecting = false;
                 }
             }
-            catch(Exception ex)
+            catch
             {
-                Console.WriteLine(ex);
+                isConnecting = false;
+                throw;
             }
             finally
             {
-                isConnecting = false;
+                isConnecting = false; //保险一点
             }
         }
         private async Task OnClose()
@@ -90,6 +93,24 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             Dispose();
 
             Utils.Log($"[OpenLive] 连接断开, 将重新连接");
+            await TryConnect();
+        }
+
+        public void Dispose()
+        {
+            _chatClient?.Dispose();
+            _chatClient = null;
+            _timer?.Dispose();
+            _timer = null;
+        }
+        bool isTryConnecting = false;
+        async Task TryConnect()
+        {
+            if (isTryConnecting)
+            {
+                return;
+            }
+            isTryConnecting = true;
             while (true)
             {
                 try
@@ -105,15 +126,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     Thread.Sleep(10000);
                 }
             }
-            Utils.Log($"[OpenLive] 已重新连接");
-        }
-
-        public void Dispose()
-        {
-            _chatClient?.Dispose();
-            _chatClient = null;
-            _timer?.Dispose();
-            _timer = null;
+            isTryConnecting = false;
         }
 
         private void WebSocketBLiveClient_ReceiveNotice(string raw, System.Text.Json.Nodes.JsonNode jObject)
@@ -177,8 +190,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         {
             _chatClient?.Dispose();
             _chatClient = null;
-            _ = Init();
-            _ = Connect();
+            _ = TryConnect();
         }
     }
 }
