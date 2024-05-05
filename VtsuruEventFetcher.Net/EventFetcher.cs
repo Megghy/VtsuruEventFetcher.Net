@@ -329,12 +329,12 @@ namespace VtsuruEventFetcher.Net
         }
         async static Task OnHubClosed(Exception error)
         {
-            if (isDisconnectByServer)
+            if (isDisconnectByServer || error is null)
             {
                 return;
             }
             _hub = null;
-            Log($"与服务器的连接断开, 正在重连: {error.Message}");
+            Log($"与服务器的连接断开, 正在重连: {error?.Message}");
             OnFail();
             await Task.Delay(new Random().Next(0, 5) * 1000);
             await ConnectHub();

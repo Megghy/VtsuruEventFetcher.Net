@@ -1,14 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
-using OpenBLive.Client.Data;
-using OpenBLive.Runtime;
-using OpenBLive.Runtime.Data;
-
-namespace VtsuruEventFetcher.Net
+﻿namespace VtsuruEventFetcher.Net
 {
     public class VTsuruEventFetcherWorker(ILogger<VTsuruEventFetcherWorker> _logger) : BackgroundService
     {

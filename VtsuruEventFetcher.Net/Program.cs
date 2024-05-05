@@ -9,4 +9,10 @@ builder.Services.AddWindowsService(options =>
 
 var host = builder.Build();
 
+AppDomain.CurrentDomain.ProcessExit += (sender, args) =>
+{
+    EventFetcher._client?.Dispose();
+    _ = EventFetcher._hub?.DisposeAsync();
+};
+
 host.Run();
