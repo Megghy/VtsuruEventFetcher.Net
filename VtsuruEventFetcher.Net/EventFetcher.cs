@@ -40,6 +40,31 @@ namespace VtsuruEventFetcher.Net
         public const string VTSURU_DEFAULT_URL = "https://vtsuru.suki.club/";
         public const string VTSURU_FAILOVER_URL = "https://failover-api.vtsuru.suki.club/";
 
+        public static readonly bool IsDockerEnv = File.Exists("/.dockerenv")
+                                  || IsDockerCGroupPresent()
+                                  || Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+
+        static bool IsDockerCGroupPresent()
+        {
+            try
+            {
+                string[] lines = File.ReadAllLines("/proc/self/cgroup");
+                foreach (var line in lines)
+                {
+                    if (line.Contains("docker") || line.Contains("kubepods"))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Handle exceptions if needed
+            }
+
+            return false;
+        }
+
         private static int failUseCount = 0;
         public static string VTSURU_URL
         {
@@ -92,6 +117,7 @@ namespace VtsuruEventFetcher.Net
         internal static long roomId;
         internal static string code;
 
+        private static DateTime _lastCheckLogTime = DateTime.Now;
 
         public static bool UsingCookie
             => !string.IsNullOrEmpty(BILI_COOKIE) || (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD));
@@ -199,6 +225,11 @@ namespace VtsuruEventFetcher.Net
             };
             timer.Elapsed += (e, args) =>
             {
+                if(_lastCheckLogTime < DateTime.Now - TimeSpan.FromMinutes(1))
+                {
+                    _lastCheckLogTime = DateTime.Now;
+                    Utils.ClearLog();
+                }
                 if(_events.Count > 0 || DateTime.Now - lastUploadEvent > uploadIntervalWhenEmpty)
                 {
                     _ = SendEventAsync();

@@ -26,13 +26,46 @@
         {
             try
             {
+                Console.WriteLine($"{DateTime.Now:HH:mm:ss} - {msg}");
+                if (EventFetcher.IsDockerEnv)
+                {
+                    return;
+                }
                 if (!Directory.Exists(LogPath))
                 {
                     Directory.CreateDirectory(LogPath);
                 }
                 var path = Path.Combine(LogPath, $"{DateTime.Now:yyyy-MM-dd}.log");
                 File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss} - {msg}" + Environment.NewLine);
-                Console.WriteLine($"{DateTime.Now:HH:mm:ss} - {msg}");
+            }
+            catch (Exception ex)
+            {
+                EventFetcher._logger?.LogError(ex.Message, ex);
+            }
+        }
+        internal static void ClearLog()
+        {
+            if (EventFetcher.IsDockerEnv)
+            {
+                return;
+            }
+            try
+            {
+                if (!Directory.Exists(LogPath))
+                {
+                    Directory.CreateDirectory(LogPath);
+                }
+                
+                var files = Directory.GetFiles(LogPath);
+                foreach (var file in files)
+                {
+                    var fileInfo = new FileInfo(file);
+                    if (fileInfo.CreationTime < DateTime.Now.AddDays(-7) || fileInfo.Length > 10 * 1024 * 1024)
+                    {
+                        File.Delete(file);
+                        Console.WriteLine($"已删除无效日志文件 {file}");
+                    }
+                }
             }
             catch (Exception ex)
             {
