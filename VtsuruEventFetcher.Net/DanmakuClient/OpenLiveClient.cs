@@ -8,6 +8,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
     public class OpenLiveClient : IDanmakuClient
     {
         bool _isRunning = false;
+        bool _isDisposed = false;
 
         AppStartData _authInfo;
         WebSocketBLiveClient _chatClient;
@@ -15,7 +16,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
         public async Task Init()
         {
             _authInfo = await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
-            while (_authInfo == null)
+            while (_authInfo == null && !_isDisposed)
             {
                 Utils.Log("[OpenLive] 初始化失败, 10秒后重试");
                 await Task.Delay(10000);
@@ -90,13 +91,18 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"OpenLive 弹幕客户端已断开连接");
 
             _isRunning = false;
-            Dispose();
+            Clear();
 
             Utils.Log($"[OpenLive] 连接断开, 将重新连接");
             await TryConnect();
         }
 
         public void Dispose()
+        {
+            _isDisposed = true;
+            Clear();
+        }
+        private void Clear()
         {
             _chatClient?.Dispose();
             _chatClient = null;
@@ -111,7 +117,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 return;
             }
             isTryConnecting = true;
-            while (true)
+            while (!_isDisposed)
             {
                 try
                 {

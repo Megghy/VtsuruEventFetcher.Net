@@ -213,11 +213,16 @@ namespace VtsuruEventFetcher.Net
                 Log($"未提供 Token");
                 Environment.Exit(0);
             }
+            if (!GetSelfInfoAsync().Result)
+            {
+                Log("提供的 Token 无效");
+                Environment.Exit(0);
+            }
 
             Log("VTsuru Token: " + VTSURU_TOKEN);
 
-            _ = InitChatClientAsync();
             _ = ConnectHub();
+
             var timer = new System.Timers.Timer()
             {
                 AutoReset = true,
@@ -333,7 +338,12 @@ namespace VtsuruEventFetcher.Net
             connection.On("Disconnect", async (string e) =>
             {
                 isDisconnectByServer = true;
+                _ = _hub?.DisposeAsync();
+                _hub = null;
                 Log($"被服务端断开连接: {e}, 为保证可用性将于30s后再次尝试连接");
+
+                _client?.Dispose();
+
                 await Task.Delay(30000);
                 _ = ConnectHub();
             });
@@ -346,6 +356,8 @@ namespace VtsuruEventFetcher.Net
                     _hub = connection;
                     isDisconnectByServer = false;
                     Log($"已连接至 VTsuru 服务器");
+
+                    _ = InitChatClientAsync();
 
                     break;
                 }

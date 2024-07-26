@@ -7,8 +7,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <UserSecretsId>dotnet-VtsuruEventFetcher.Net-7dee3bda-340f-4b6e-8f4f-77f029c072f0</UserSecretsId>
 	<IncludeContextClasses>true</IncludeContextClasses>
-	<AssemblyVersion>1.0.6.2</AssemblyVersion>
-	<FileVersion>1.0.6.2</FileVersion>
+	<AssemblyVersion>1.0.6.3</AssemblyVersion>
+	<FileVersion>1.0.6.3</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
