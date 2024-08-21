@@ -99,13 +99,21 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
         JToken userInfo;
         long uId;
+        int retryCount = 0;
         public async Task Init()
         {
             while (!(await UpdateCookieAsync()))
             {
-                Utils.Log("[CookieClient] 无法从 CookieCloud 获取 Cookie, 10秒后重试");
-                await Task.Delay(10000);
+                var delayTime = (retryCount * 1000 * 10) * 2;
+                if(delayTime > 10 * 60 * 1000)
+                {
+                    delayTime = 10 * 60 * 1000;
+                }
+                Utils.Log("[CookieClient] <第 " + retryCount + " 次> 无法从 CookieCloud 获取 Cookie, 60秒后重试");
+                retryCount++;
+                await Task.Delay(delayTime);
             }
+            retryCount = 0;
             Utils.Log("[CookieClient] 已从 CookieCloud 获取 Cookie");
             while (!(await UpdateUserInfoAsync()))
             {
@@ -116,7 +124,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             {
                 _updateCookieTimer = new()
                 {
-                    Interval = TimeSpan.FromSeconds(120).TotalMilliseconds,
+                    Interval = 10 * 60 * 1000,
                     AutoReset = true,
                 };
                 _updateCookieTimer.Elapsed += (_, _) =>
