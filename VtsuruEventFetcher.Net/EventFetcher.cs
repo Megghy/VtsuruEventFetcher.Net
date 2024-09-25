@@ -230,12 +230,12 @@ namespace VtsuruEventFetcher.Net
             };
             timer.Elapsed += (e, args) =>
             {
-                if(_lastCheckLogTime < DateTime.Now - TimeSpan.FromMinutes(1))
+                if (_lastCheckLogTime < DateTime.Now - TimeSpan.FromMinutes(1))
                 {
                     _lastCheckLogTime = DateTime.Now;
                     Utils.ClearLog();
                 }
-                if(_events.Count > 0 || DateTime.Now - lastUploadEvent > uploadIntervalWhenEmpty)
+                if (_events.Count > 0 || DateTime.Now - lastUploadEvent > uploadIntervalWhenEmpty)
                 {
                     _ = SendEventAsync();
                     lastUploadEvent = DateTime.Now;
@@ -347,6 +347,10 @@ namespace VtsuruEventFetcher.Net
                 await Task.Delay(30000);
                 _ = ConnectHub();
             });
+            connection.On("Request", async (string url, string method, string body, bool useCookie) =>
+            {
+                return await RequestAsync(url, method, body, useCookie);
+            });
 
             while (true)
             {
@@ -356,6 +360,8 @@ namespace VtsuruEventFetcher.Net
                     _hub = connection;
                     isDisconnectByServer = false;
                     Log($"已连接至 VTsuru 服务器");
+
+                    await _hub.SendAsync("ConnectFinished", _version, UsingCookie);
 
                     _ = InitChatClientAsync();
 
@@ -474,6 +480,56 @@ namespace VtsuruEventFetcher.Net
                     Errors.Remove(ErrorCodes.UNABLE_UPLOAD_EVENT);
                 }
                 isUploading = false;
+            }
+        }
+        [MessagePackObject(keyAsPropertyName: true)]
+        public record ResponseClientRequestData(bool Success, string Message, string Data);
+        /// <summary>
+        /// 用于获取粉丝, 舰长等数据, 如果不放心的话可以自行添加url代码检查
+        /// </summary>
+        /// <param name="url">仅用于bilibili域名下</param>
+        /// <param name="method"></param>
+        /// <param name="body"></param>
+        /// <param name="useCookie"></param>
+        /// <returns></returns>
+        public static async Task<ResponseClientRequestData> RequestAsync(string url, string method = "GET", string body = null, bool useCookie = true)
+        {
+            using var client = new HttpClient();
+            try
+            {
+                var uri = new Uri(url);
+                if (!uri.Host.ToLower().EndsWith("bilibili.com"))
+                {
+                    Log($"[Request] 请求失败: 非bilibili域名");
+                    return new(false, $"请求失败: 非bilibili域名", string.Empty);
+                }
+                var request = new HttpRequestMessage(new HttpMethod(method), url);
+                var content = string.IsNullOrEmpty(body) ? null : new StringContent(body, Encoding.UTF8, "application/json");
+                request.Content = content;
+
+                if(useCookie && !UsingCookie)
+                {
+                    return new(false, "未启用cookie", string.Empty);
+                }
+                if (useCookie && UsingCookie)
+                {
+                    request.Headers.TryAddWithoutValidation("Cookie", (_client as CookieClient)._cookie);
+                }
+
+                var response = await client.SendAsync(request);
+                Log($"[Request] 请求URL: {url}, 请求方法: {method}, 响应: {response.StatusCode}");
+                if (!response.IsSuccessStatusCode)
+                {
+                    Log($"[Request] 请求失败: {response.StatusCode}");
+                    return new(false, $"请求失败: {response.StatusCode}, {response.ReasonPhrase}", string.Empty);
+                }
+                var result = await response.Content.ReadAsStringAsync();
+                return new(true, string.Empty, result);
+            }
+            catch (Exception ex)
+            {
+                Log($"[Request] 请求失败: {ex.Message}");
+                return new(false, $"请求失败: {ex.Message}", string.Empty);
             }
         }
         static bool isIniting = false;

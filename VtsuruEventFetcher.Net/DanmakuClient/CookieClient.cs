@@ -92,7 +92,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
 
         System.Timers.Timer _updateCookieTimer;
-        string _cookie = cookie;
+        internal string _cookie = cookie;
         readonly string _cookieCloudKey = cookieCloudKey;
         readonly string _cookieCloudPassword = cookieCloudPassword;
         private readonly string _cookieCloudHost = string.IsNullOrEmpty(cookieCloudHost) ? "https://cookie.suki.club/" : cookieCloudHost;
