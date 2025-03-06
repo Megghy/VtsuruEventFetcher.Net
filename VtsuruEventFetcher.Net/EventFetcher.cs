@@ -266,14 +266,6 @@ namespace VtsuruEventFetcher.Net
                 });
             }
         }
-        static void SendNotice()
-        {
-            // 创建通知内容
-            /*var content = new ToastContentBuilder()
-                .AddText("你的标题")
-                .AddText("你的通知文本")
-                .show();*/
-        }
         public static async Task<bool> GetSelfInfoAsync()
         {
             try
@@ -328,29 +320,8 @@ namespace VtsuruEventFetcher.Net
                 return;
             }
             isConnectingHub = true;
-            var connection = new HubConnectionBuilder()
-                .WithUrl(VTSURU_HUB_URL + $"event-fetcher?token={VTSURU_TOKEN}")
-                .WithAutomaticReconnect()
-                .AddMessagePackProtocol()
-                .Build();
-
-            connection.Closed += (error) => _ = OnHubClosed(error);
-            connection.On("Disconnect", async (string e) =>
-            {
-                isDisconnectByServer = true;
-                _ = _hub?.DisposeAsync();
-                _hub = null;
-                Log($"被服务端断开连接: {e}, 为保证可用性将于30s后再次尝试连接");
-
-                _client?.Dispose();
-
-                await Task.Delay(30000);
-                _ = ConnectHub();
-            });
-            connection.On("Request", async (string url, string method, string body, bool useCookie) =>
-            {
-                return await RequestAsync(url, method, body, useCookie);
-            });
+            HubConnection connection = null;
+            CreateConnection();
 
             while (true)
             {
@@ -370,8 +341,39 @@ namespace VtsuruEventFetcher.Net
                 catch (Exception ex)
                 {
                     Log(ex.ToString());
-                    Errors.TryAdd(ErrorCodes.UNABLE_CONNECTTOHUB, $"无法连接至 VTsuru 服务器");
+                    Errors.TryAdd(ErrorCodes.UNABLE_CONNECTTOHUB, $"无法连接至 VTsuru 服务器: {ex.Message}");
+                    await Task.Delay(5000);
+                    CreateConnection();
                 }
+            }
+            void CreateConnection()
+            {
+                connection = new HubConnectionBuilder()
+                .WithUrl(VTSURU_HUB_URL + $"event-fetcher?token={VTSURU_TOKEN}")
+                .WithAutomaticReconnect()
+                .AddMessagePackProtocol()
+                .Build();
+
+                connection.Closed += (error) => _ = OnHubClosed(error);
+                connection.On("Disconnect", async (string e) =>
+                {
+                    isDisconnectByServer = true;
+                    _ = connection?.DisposeAsync();
+                    if (_hub == connection)
+                    {
+                        _hub = null;
+                    }
+                    Log($"被服务端断开连接: {e}, 为保证可用性将于30s后再次尝试连接");
+
+                    _client?.Dispose();
+
+                    await Task.Delay(30000);
+                    _ = ConnectHub();
+                });
+                connection.On("Request", async (string url, string method, string body, bool useCookie) =>
+                {
+                    return await RequestAsync(url, method, body, useCookie);
+                });
             }
             isConnectingHub = false;
             Errors.Remove(ErrorCodes.UNABLE_CONNECTTOHUB);
@@ -507,7 +509,7 @@ namespace VtsuruEventFetcher.Net
                 var content = string.IsNullOrEmpty(body) ? null : new StringContent(body, Encoding.UTF8, "application/json");
                 request.Content = content;
 
-                if(useCookie && !UsingCookie)
+                if (useCookie && !UsingCookie)
                 {
                     return new(false, "未启用cookie", string.Empty);
                 }
