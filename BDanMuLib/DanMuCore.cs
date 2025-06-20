@@ -28,13 +28,7 @@ namespace BDanMuLib
     /// <param name="messageType"></param>
     /// <param name="obj"></param>
     public delegate void ReceiveMessage(long roomId, MessageType messageType, IBaseMessage obj);
-    /// <summary>
-    /// 返回handled
-    /// </summary>
-    /// <param name="roomId"></param>
-    /// <param name="msg"></param>
-    /// <returns></returns>
-    public delegate bool ReceiveRawMessage(long roomId, string msg);
+    public delegate bool ReceiveRawMessage(long roomId, string message);
 
 
     /// <summary>
@@ -285,14 +279,24 @@ namespace BDanMuLib
                         { "room_id", _roomId.ToString() },
                         { "ts", (DateTime.Now.ToUnix() / 1000).ToString() }
                     })));*/
-            var connectRequest = new HttpRequestMessage(HttpMethod.Get, new Uri($"{(string.IsNullOrEmpty(Proxy) ? "https://api.live.bilibili.com/" : Proxy)}xlive/web-room/v1/index/getDanmuInfo?id=" + _roomId));
+            var connectRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?" + Utils.EncWbi(new()
+            {
+                { "id", _roomId.ToString() },
+                { "type", "0" },
+            })));
             //var connectRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(ApiUrls.BroadCastUrl + _roomId));
 
             if (!string.IsNullOrEmpty(_cookie))
                 connectRequest.Headers.TryAddWithoutValidation("Cookie", _cookie);
+            connectRequest.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0");
             var requestContent = await client.SendAsync(connectRequest, cancel == default ? CancellationToken.None : cancel);
+            var json = JObject.Parse(await requestContent.Content.ReadAsStringAsync());
+            if (!json["code"].Value<int>().Equals(0))
+            {
+                throw new Exception($"获取房间信息失败: {json["message"].Value<string>()}");
+            }
 
-            var dataJToken = JObject.Parse(await requestContent.Content.ReadAsStringAsync(cancel))["data"];
+            var dataJToken = json["data"];
 
             return dataJToken;
         }
@@ -598,6 +602,9 @@ namespace BDanMuLib
                     var json = Encoding.UTF8.GetString(buffer, 0, buffer.Length);
                     Console.WriteLine(json);
                     var jObj = JObject.Parse(json);
+
+                    if (!jObj.ContainsKey("cmd")) return;
+
                     var cmd = jObj.Value<string>("cmd");
 
                     if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
@@ -731,12 +738,13 @@ namespace BDanMuLib
         }
         private void HandleCmd(string json)
         {
-            if(ReceiveRawMessage?.Invoke(_roomId, json) == true)
-            {
-                return;
-            }
             var danmaku = GetDanmakuFromRawMessage(json);
             var cmd = danmaku.Metadata.Value<string>("cmd");
+            if (ReceiveRawMessage?.Invoke(_roomId, json) == true)
+            {
+                return; // 如果有RawMessage事件处理，则不再继续处理
+            }
+
             if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
                 switch (cmdCommand)
                 {
@@ -772,7 +780,7 @@ namespace BDanMuLib
                         }
                     case MessageType.ONLINE_RANK_COUNT:
                         {
-                           // var rank = jObj["data"]["count"].Value<string>();
+                            // var rank = jObj["data"]["count"].Value<string>();
                             ReceiveMessage?.Invoke(_roomId, MessageType.ONLINE_RANK_COUNT, danmaku);
                         }
                         break;
@@ -799,13 +807,13 @@ namespace BDanMuLib
                         break;
                     case MessageType.HOT_RANK_CHANGED_V2:
                         {
-                           // var rank = jObj["data"]["rank"].Value<string>();
+                            // var rank = jObj["data"]["rank"].Value<string>();
                             ReceiveMessage?.Invoke(_roomId, MessageType.HOT_RANK_CHANGED_V2, danmaku);
                         }
                         break;
                     case MessageType.ONLINE_RANK_TOP3:
                         {
-                           // var list = jObj["data"]["list"].ToList();
+                            // var list = jObj["data"]["list"].ToList();
                             ReceiveMessage?.Invoke(_roomId, MessageType.ONLINE_RANK_TOP3, danmaku);
                         }
                         break;
@@ -862,6 +870,7 @@ namespace BDanMuLib
         {
             //Console.WriteLine(json);
             var jObj = JObject.Parse(rawMessage);
+            if (!jObj.ContainsKey("cmd")) return new DefaultMessage(jObj);
             var cmd = jObj.Value<string>("cmd");
 
             if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
@@ -939,11 +948,11 @@ namespace BDanMuLib
                         return new VirtualMVPMessage(jObj);
                     case MessageType.WARNING:
                         return new WarnMessage(jObj);
-                    //case MessageType.NONE:
+                        //case MessageType.NONE:
                 }
             }
             else if (cmd.StartsWith("DANMU_MSG"))
-               return new DanmuMessage(jObj);
+                return new DanmuMessage(jObj);
             return new DefaultMessage(jObj);
         }
 

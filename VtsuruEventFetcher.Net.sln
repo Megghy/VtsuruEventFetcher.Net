@@ -5,7 +5,7 @@ VisualStudioVersion = 17.9.34310.174
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VtsuruEventFetcher.Net", "VtsuruEventFetcher.Net\VtsuruEventFetcher.Net.csproj", "{E49445C9-CE90-4FC4-BB4C-A42AF24C55D2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BDanMuLib", "..\BDanMuLib\BDanMuLib.csproj", "{FEE23EA8-A0BA-A9CA-3AAB-E38D4B82A6C6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BDanMuLib", "BDanMuLib\BDanMuLib.csproj", "{ABC7C6A0-7FA9-FD1C-D465-FABC595CC3B8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -17,10 +17,10 @@ Global
 		{E49445C9-CE90-4FC4-BB4C-A42AF24C55D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E49445C9-CE90-4FC4-BB4C-A42AF24C55D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E49445C9-CE90-4FC4-BB4C-A42AF24C55D2}.Release|Any CPU.Build.0 = Release|Any CPU
-		{FEE23EA8-A0BA-A9CA-3AAB-E38D4B82A6C6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{FEE23EA8-A0BA-A9CA-3AAB-E38D4B82A6C6}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{FEE23EA8-A0BA-A9CA-3AAB-E38D4B82A6C6}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{FEE23EA8-A0BA-A9CA-3AAB-E38D4B82A6C6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ABC7C6A0-7FA9-FD1C-D465-FABC595CC3B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ABC7C6A0-7FA9-FD1C-D465-FABC595CC3B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ABC7C6A0-7FA9-FD1C-D465-FABC595CC3B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ABC7C6A0-7FA9-FD1C-D465-FABC595CC3B8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

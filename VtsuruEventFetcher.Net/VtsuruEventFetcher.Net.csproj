@@ -26,6 +26,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\BDanMuLib\BDanMuLib.csproj" />
+    <ProjectReference Include="..\BDanMuLib\BDanMuLib.csproj" />
   </ItemGroup>
 </Project>

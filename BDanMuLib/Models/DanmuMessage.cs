@@ -62,6 +62,8 @@ namespace BDanMuLib.Models
         public string EmojiUrl;
         public string EmojiName;
         public string CT;
+        public DateTime Timestamp;
+
         public DanmuMessage(JObject json) : base(json)
         {
             var info = json["info"];

@@ -37,10 +37,17 @@ namespace BDanMuLib.Models
             var data = json["data"];
             UserId = long.Parse(data["uid"].ToString());
             Username = data["uname"]?.ToString();
-            Medal = data["fans_medal"]["medal_name"]?.ToString();
-            MedalLevel = int.Parse(data["fans_medal"]["medal_level"]?.ToString());
-            MedalOwnerId = long.Parse(data["fans_medal"]["target_id"].ToString());
             SendTime = data["timestamp"].Value<long>().FromUnix();
+            try
+            {
+                if (data["fans_medal"] is not null)
+                {
+                    Medal = data["fans_medal"]["medal_name"]?.ToString();
+                    MedalLevel = int.Parse(data["fans_medal"]["medal_level"]?.ToString() ?? "0");
+                    MedalOwnerId = long.Parse(data["fans_medal"]["target_id"]?.ToString() ?? "0");
+                }
+            }
+            catch { } //???
         }
 
         public override DateTime SendTime { get; }
