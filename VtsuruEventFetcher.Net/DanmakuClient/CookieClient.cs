@@ -105,7 +105,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             while (!(await UpdateCookieAsync()))
             {
                 var delayTime = (retryCount * 1000 * 10) * 2;
-                if(delayTime > 10 * 60 * 1000)
+                if (delayTime > 10 * 60 * 1000)
                 {
                     delayTime = 10 * 60 * 1000;
                 }
@@ -163,6 +163,10 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                         foreach (var cookie in biliCookie)
                         {
                             cookieStringBuilder.AppendFormat("{0}={1}; ", cookie["name"], cookie["value"]);
+                            if (cookie["name"].Value<string>() == "DedeUserID")
+                            {
+                                Console.WriteLine($"Cookie 所属 Uid: {cookie["value"]}");
+                            }
                         }
                         _cookie = cookieStringBuilder.ToString();
                         EventFetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE);
