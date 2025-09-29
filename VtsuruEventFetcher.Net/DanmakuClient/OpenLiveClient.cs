@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenBLive.Client.Data;
 using OpenBLive.Runtime;
@@ -7,20 +7,25 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 {
     public class OpenLiveClient : IDanmakuClient
     {
+        private readonly EventFetcher _fetcher;
         bool _isRunning = false;
         bool _isDisposed = false;
 
         AppStartData _authInfo;
         WebSocketBLiveClient _chatClient;
         System.Timers.Timer _timer;
+        public OpenLiveClient(EventFetcher fetcher)
+        {
+            _fetcher = fetcher;
+        }
         public async Task Init()
         {
-            _authInfo = await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
+            _authInfo = await StartRoomAsync(_fetcher.VTsuruToken);
             while (_authInfo == null && !_isDisposed)
             {
-                Utils.Log("[OpenLive] 初始化失败, 10秒后重试");
+                _fetcher.Log("[OpenLive] 初始化失败, 10秒后重试");
                 await Task.Delay(10000);
-                _authInfo ??= await StartRoomAsync(EventFetcher.VTSURU_TOKEN);
+                _authInfo ??= await StartRoomAsync(_fetcher.VTsuruToken);
             }
 
             if (_timer is null)
@@ -64,8 +69,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 }
                 else
                 {
-                    Utils.Log($"[OpenLive] 已连接直播间: {_authInfo.AnchorInfo.UName}<{_authInfo.AnchorInfo.Uid}>");
-                    EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                    _fetcher.Log($"[OpenLive] 已连接直播间: {_authInfo.AnchorInfo.UName}<{_authInfo.AnchorInfo.Uid}>");
+                    _fetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
                     _chatClient = WebSocketBLiveClient;
                     _isRunning = true;
                     isConnecting = false;
@@ -88,12 +93,12 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 return;
             }
 
-            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"OpenLive 弹幕客户端已断开连接");
+            _fetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"OpenLive 弹幕客户端已断开连接");
 
             _isRunning = false;
             Clear();
 
-            Utils.Log($"[OpenLive] 连接断开, 将重新连接");
+            _fetcher.Log($"[OpenLive] 连接断开, 将重新连接");
             await TryConnect();
         }
 
@@ -128,7 +133,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 catch (Exception ex)
                 {
                     Dispose();
-                    Utils.Log($"[OpenLive] 无法重新连接, 10秒后重试: {ex.Message}");
+                    _fetcher.Log($"[OpenLive] 无法重新连接, 10秒后重试: {ex.Message}");
                     Thread.Sleep(10000);
                 }
             }
@@ -137,30 +142,29 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
         private void WebSocketBLiveClient_ReceiveNotice(string raw, System.Text.Json.Nodes.JsonNode jObject)
         {
-            EventFetcher.AddEvent(raw);
+            _fetcher.AddEvent(raw);
         }
-        public static async Task<AppStartData> StartRoomAsync(string token)
+        private async Task<AppStartData> StartRoomAsync(string token)
         {
             try
             {
-                var response = await Utils.GetAsync($"{EventFetcher.VTSURU_API_URL}open-live/start?token={token}");
+                var response = await Utils.GetAsync($"{_fetcher.VTSURU_API_URL}open-live/start?token={token}");
                 var res = JObject.Parse(response);
 
                 if ((int)res["code"] == 200)
                 {
-                    EventFetcher.Errors.Remove(ErrorCodes.OPEN_LIVE_UNABLE_START_GAME);
+                    _fetcher.Errors.Remove(ErrorCodes.OPEN_LIVE_UNABLE_START_GAME);
                     return JsonConvert.DeserializeObject<AppStartData>(res["data"].ToString());
                 }
                 else
                 {
-                    Utils.Log("[START ROOM] " + res["message"].ToString());
-
-                    EventFetcher.Errors.TryAdd(ErrorCodes.OPEN_LIVE_UNABLE_START_GAME, "[OpenLive] 无法开启场次: " + res["message"].ToString());
+                    _fetcher.Log("[START ROOM] " + res["message"].ToString());
+                    _fetcher.Errors.TryAdd(ErrorCodes.OPEN_LIVE_UNABLE_START_GAME, "[OpenLive] 无法开启场次: " + res["message"].ToString());
                 }
             }
             catch (Exception err)
             {
-                Utils.Log("[OpenLive] 无法开启场次: " + err.Message);
+                _fetcher.Log("[OpenLive] 无法开启场次: " + err.Message);
             }
 
             return null;
@@ -173,13 +177,13 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
             try
             {
-                var response = await Utils.GetAsync(EventFetcher.VTSURU_API_URL + "open-live/heartbeat-internal?token=" + EventFetcher.VTSURU_TOKEN);
+                var response = await Utils.GetAsync(_fetcher.VTSURU_API_URL + "open-live/heartbeat-internal?token=" + _fetcher.VTsuruToken);
 
                 dynamic resp = JObject.Parse(response);
 
                 if (resp.code != 200)
                 {
-                    Utils.Log($"[HEARTBEAT] 直播场认证信息已过期: {resp.message}");
+                    _fetcher.Log($"[HEARTBEAT] 直播场认证信息已过期: {resp.message}");
                     RestartRoom();
                     return false;
                 }

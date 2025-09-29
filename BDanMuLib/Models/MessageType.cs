@@ -57,6 +57,11 @@
         INTERACT_WORD,
 
         /// <summary>
+        /// 进入房间 V2
+        /// </summary>
+        INTERACT_WORD_V2,
+
+        /// <summary>
         /// 榜单排名数
         /// </summary>
         ONLINE_RANK_COUNT,
@@ -109,6 +114,11 @@
         /// 榜单排名
         /// </summary>
         ONLINE_RANK_V2,
+
+        /// <summary>
+        /// 榜单排名 V3
+        /// </summary>
+        ONLINE_RANK_V3,
 
         /// <summary>
         /// 礼物连击

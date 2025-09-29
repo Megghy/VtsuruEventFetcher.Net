@@ -19,6 +19,8 @@ using BDanMuLib.Models;
 using Nerdbank.Streams;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Net.WebSockets;
+using System.Net.Sockets;
 
 namespace BDanMuLib
 {
@@ -40,8 +42,37 @@ namespace BDanMuLib
         public static int MaxErrorCount = 10;
 
         public static string Proxy;
+        public static string CaptchaResolverEndpointBase = "";
 
         private readonly static Random Rand = new();
+
+        /// <summary>
+        /// 消息类型到消息类构造函数的映射字典
+        /// 用于统一消息对象的创建逻辑，避免重复的 switch 语句
+        /// </summary>
+        private static readonly Dictionary<MessageType, Func<JObject, IBaseMessage>> MessageTypeMap = new()
+        {
+            { MessageType.DANMU_MSG, json => new DanmuMessage(json) },
+            { MessageType.SEND_GIFT, json => new GiftMessage(json) },
+            { MessageType.PREPARING, json => new DefaultMessage(json) },
+            { MessageType.LIVE, json => new DefaultMessage(json) },
+            { MessageType.INTERACT_WORD, json => new InteractWordMessage(json) },
+            { MessageType.INTERACT_WORD_V2, json => new InteractWordV2Message(json) },
+            { MessageType.ONLINE_RANK_COUNT, json => new OnlineRankChangeMessage(json) },
+            { MessageType.WATCHED_CHANGE, json => new WatchNumChangeMessage(json) },
+            { MessageType.HOT_RANK_CHANGED, json => new DefaultMessage(json) },
+            { MessageType.HOT_RANK_CHANGED_V2, json => new DefaultMessage(json) },
+            { MessageType.ONLINE_RANK_TOP3, json => new DefaultMessage(json) },
+            { MessageType.ONLINE_RANK_V3, json => new OnlineRankV3Message(json) },
+            { MessageType.SUPER_CHAT_MESSAGE, json => new SuperChatMessage(json) },
+            { MessageType.SUPER_CHAT_MESSAGE_JP, json => new SuperChatMessage(json) },
+            { MessageType.ROOM_CHANGE, json => new RoomChangeMessage(json) },
+            { MessageType.USER_TOAST_MSG, json => new GuardBuyMessage(json) },
+            { MessageType.ROOM_BLOCK_MSG, json => new BlockMessage(json) },
+            { MessageType.LIKE_INFO_V3_UPDATE, json => new LikeChangeMessage(json) },
+            { MessageType.USER_VIRTUAL_MVP, json => new VirtualMVPMessage(json) },
+            { MessageType.WARNING, json => new WarnMessage(json) }
+        };
 
         private static DateTime _lastGetCookie = DateTime.MinValue;
         private static DateTime? _cookieExpireDate;
@@ -133,9 +164,11 @@ namespace BDanMuLib
         }
         /// <summary>
         /// 连接直播弹幕服务器
+        /// 建立与 B 站弹幕服务器的连接，获取房间 token 并发送认证信息
         /// </summary>
-        /// <param name="roomId">房间号</param>
-        /// <returns>连接结果</returns>
+        /// <param name="proxy">代理服务器配置（可选）</param>
+        /// <param name="cancel">取消令牌，用于取消连接操作</param>
+        /// <returns>连接是否成功</returns>
         public async Task<bool> ConnectAsync(WebProxy proxy = null, CancellationToken cancel = default)
         {
             IPAddress ip = null;
@@ -157,22 +190,29 @@ namespace BDanMuLib
                     if (string.IsNullOrEmpty(_buvidCookie)
                         || DateTime.Now - _lastGetCookie > _getCookieTime)
                     {
-                        var uri = new Uri("https://data.bilibili.com/v/");
+                        var uri = new Uri("https://api.bilibili.com/x/web-frontend/getbuvid");
                         var request = new HttpRequestMessage(HttpMethod.Get, uri);
                         request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36");
                         request.Headers.Add("Upgrade-Insecure-Requests", "1");
                         var buvidResponse = await client.SendAsync(request, cancel);
                         try
                         {
-                            if (buvidResponse.IsSuccessStatusCode && buvidResponse.Headers.GetValues("Set-Cookie") is { } cookies && cookies.Any())
+                            if (!buvidResponse.IsSuccessStatusCode)
                             {
-                                //_cookie = Regex.Match(cookies.First(), @"buvid\d=(.*?);").Groups[1].Value;
-                                //var expireString = Regex.Match(cookies.First(), @"Expires=(.*?);").Groups[1].Value;
-                                //_cookieExpireDate = DateTime.Parse(expireString);
-                                //_buvidCookie = string.Join(";", cookies);
-                                _buvidCookie = Regex.Match(cookies.First(c => Regex.IsMatch(c, @"buvid\d=(.*?);")), @"buvid\d=(.*?);").Groups[1].Value;
+                                Console.WriteLine($"无法获取Buvid: {buvidResponse.StatusCode}");
+                                return false;
+                            }
+                            var json = JObject.Parse(await buvidResponse.Content.ReadAsStringAsync(cancel));
+                            if (json["code"].ToString() == "0")
+                            {
+                                _buvidCookie = json["data"]["buvid"].ToString();
                                 Console.WriteLine($"已刷新buvid: {_buvidCookie}");
                                 _lastGetCookie = DateTime.Now;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"无法获取Buvid: {json["code"]}");
+                                return false;
                             }
                         }
                         catch (Exception ex)
@@ -273,25 +313,17 @@ namespace BDanMuLib
                 Proxy = proxy,
                 AutomaticDecompression = DecompressionMethods.All
             });
-            /*var connectRequest = new HttpRequestMessage(HttpMethod.Get,
-                        new Uri($"{(string.IsNullOrEmpty(Proxy) ? "https://api.live.bilibili.com/" : Proxy)}xlive/app-room/v1/index/getDanmuInfo?" + AppSign(new()
-                    {
-                        { "room_id", _roomId.ToString() },
-                        { "ts", (DateTime.Now.ToUnix() / 1000).ToString() }
-                    })));*/
-            var connectRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?" + Utils.EncWbi(new()
+            var baseQuery = new Dictionary<string, string>()
             {
                 { "id", _roomId.ToString() },
                 { "type", "0" },
-            })));
-            //var connectRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(ApiUrls.BroadCastUrl + _roomId));
-
-            if (!string.IsNullOrEmpty(_cookie))
-                connectRequest.Headers.TryAddWithoutValidation("Cookie", _cookie);
-            connectRequest.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0");
-            var requestContent = await client.SendAsync(connectRequest, cancel == default ? CancellationToken.None : cancel);
-            var json = JObject.Parse(await requestContent.Content.ReadAsStringAsync());
-            if (!json["code"].Value<int>().Equals(0))
+            };
+            var request = GetTokenRequest(baseQuery);
+            var response = await client.SendAsync(request, cancel == default ? CancellationToken.None : cancel);
+            var responseText = await response.Content.ReadAsStringAsync();
+            var json = JObject.Parse(responseText);
+            var code = json["code"].Value<int>();
+            if (code != 0)
             {
                 throw new Exception($"获取房间信息失败: {json["message"].Value<string>()}");
             }
@@ -299,6 +331,48 @@ namespace BDanMuLib
             var dataJToken = json["data"];
 
             return dataJToken;
+        }
+        /// <summary>
+        /// 清洗 HTTP 头部的值，移除非 ASCII 字符以及换行控制字符，避免 .NET HttpClient 抛出异常。
+        /// </summary>
+        /// <param name="value">原始头部值</param>
+        /// <returns>仅包含可打印 ASCII 的清洗后字符串</returns>
+        private static string SanitizeHeaderValue(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            // 允许范围: 0x20(space) - 0x7E(~)。去除 0x00-0x1F 及 0x7F 以及任何 >0x7F 的字符
+            var sb = new StringBuilder(value.Length);
+            foreach (var ch in value)
+            {
+                if (ch >= 0x20 && ch <= 0x7E)
+                {
+                    sb.Append(ch);
+                }
+            }
+            return sb.ToString();
+        }
+        HttpRequestMessage GetTokenRequest(Dictionary<string, string> baseQuery)
+        {
+            var connectRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?" + Utils.EncWbi(new Dictionary<string, string>(baseQuery))));
+
+            var asciiCookie = SanitizeHeaderValue(_cookie);
+            if (!string.IsNullOrEmpty(asciiCookie))
+                connectRequest.Headers.TryAddWithoutValidation("Cookie", asciiCookie);
+            var asciiUA = SanitizeHeaderValue(Extensions.RandomUa.RandomUserAgent);
+            connectRequest.Headers.TryAddWithoutValidation("User-Agent", asciiUA);
+            connectRequest.Headers.TryAddWithoutValidation("Referer", "https://www.bilibili.com");
+            connectRequest.Headers.TryAddWithoutValidation("Origin", "https://www.bilibili.com");
+            connectRequest.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+            connectRequest.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9");
+            connectRequest.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip, deflate, br");
+            connectRequest.Headers.TryAddWithoutValidation("Connection", "keep-alive");
+            connectRequest.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+            connectRequest.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "empty");
+            connectRequest.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "cors");
+            connectRequest.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "same-origin");
+            connectRequest.Headers.TryAddWithoutValidation("Sec-GPC", "1");
+            connectRequest.Headers.TryAddWithoutValidation("TE", "trailers");
+            return connectRequest;
         }
 
         private const string APP_KEY = "1d8b6e7d45233436";
@@ -388,8 +462,9 @@ namespace BDanMuLib
 
         /// <summary>
         /// 循环发送心跳包
+        /// 每 30 秒向服务器发送一次心跳包，保持连接活跃状态
         /// </summary>
-        /// <returns></returns>
+        /// <returns>异步任务</returns>
         private async Task HeartBeatLoopAsync()
         {
             try
@@ -414,19 +489,55 @@ namespace BDanMuLib
 
         private async Task ProcessDataAsync(PipeReader reader, Action<string> callback)
         {
-            while (true)
+            try
             {
-                var result = await reader.ReadAsync();
-                var buffer = result.Buffer;
+                while (true)
+                {
+                    ReadResult result;
+                    try
+                    {
+                        result = await reader.ReadAsync();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // 正常的取消/关闭，静默退出
+                        break;
+                    }
+                    catch (IOException ioEx)
+                    {
+                        // 连接关闭或传输中断（例如 Operation canceled），视为正常退出
+                        var msg = ioEx.Message ?? string.Empty;
+                        if (msg.IndexOf("Operation canceled", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            break;
+                        }
+                        if (ioEx.InnerException is SocketException)
+                        {
+                            break;
+                        }
+                        // 其他 IO 异常抛出到上层（会被 ConnectAsync 外层捕获）
+                        throw;
+                    }
+                    catch (WebSocketException)
+                    {
+                        // 远端未完成关闭握手直接断开，视为正常退出
+                        break;
+                    }
 
-                while (TryParseCommand(ref buffer, callback)) { }
+                    var buffer = result.Buffer;
 
-                reader.AdvanceTo(buffer.Start, buffer.End);
+                    while (TryParseCommand(ref buffer, callback)) { }
 
-                if (result.IsCompleted)
-                    break;
+                    reader.AdvanceTo(buffer.Start, buffer.End);
+
+                    if (result.IsCanceled || result.IsCompleted)
+                        break;
+                }
             }
-            await reader.CompleteAsync();
+            finally
+            {
+                try { await reader.CompleteAsync(); } catch { }
+            }
         }
 
         private bool TryParseCommand(ref ReadOnlySequence<byte> buffer, Action<string> callback)
@@ -488,22 +599,45 @@ namespace BDanMuLib
         private void ParseCommandCompressedBody(Stream decompressed, Action<string> callback)
         {
             var reader = PipeReader.Create(decompressed);
-            while (true)
+            try
             {
+                while (true)
+                {
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-                // 全内存内运行同步返回，所以不会有问题
-                var result = reader.ReadAsync().Result;
+                    // 全内存内运行同步返回，所以不会有问题
+                    var result = reader.ReadAsync().Result;
 #pragma warning restore VSTHRD002 // Avoid problematic synchronous waits
-                var inner_buffer = result.Buffer;
+                    var inner_buffer = result.Buffer;
 
-                while (TryParseCommand(ref inner_buffer, callback)) { }
+                    while (TryParseCommand(ref inner_buffer, callback)) { }
 
-                reader.AdvanceTo(inner_buffer.Start, inner_buffer.End);
+                    reader.AdvanceTo(inner_buffer.Start, inner_buffer.End);
 
-                if (result.IsCompleted)
-                    break;
+                    if (result.IsCompleted)
+                        break;
+                }
             }
-            reader.Complete();
+            catch (OperationCanceledException)
+            {
+                // 忽略
+            }
+            catch (IOException ioEx)
+            {
+                var msg = ioEx.Message ?? string.Empty;
+                if (msg.IndexOf("Operation canceled", StringComparison.OrdinalIgnoreCase) < 0 && ioEx.InnerException is not SocketException)
+                {
+                    throw;
+                }
+                // 其他认为是正常关闭，忽略
+            }
+            catch (WebSocketException)
+            {
+                // 远端直接断开，忽略
+            }
+            finally
+            {
+                try { reader.Complete(); } catch { }
+            }
         }
 
         private void ParseCommandNormalBody(ref ReadOnlySequence<byte> buffer, int action, Action<string> callback)
@@ -581,379 +715,128 @@ namespace BDanMuLib
         }
         #endregion
 
+        /// <summary>
+        /// 解析原始消息并创建对应的消息对象
+        /// 统一的消息解析逻辑，避免重复代码
+        /// </summary>
+        /// <param name="rawMessage">原始 JSON 消息字符串</param>
+        /// <returns>解析后的消息对象</returns>
+        private static IBaseMessage ParseMessage(string rawMessage)
+        {
+            var jObj = JObject.Parse(rawMessage);
+            if (!jObj.ContainsKey("cmd"))
+                return new DefaultMessage(jObj);
+
+            var cmd = jObj.Value<string>("cmd");
+
+            // 处理特殊的 DANMU_MSG 变体（如 DANMU_MSG:4:0:2:2:2:0）
+            if (cmd.StartsWith("DANMU_MSG"))
+                return new DanmuMessage(jObj);
+
+            // 尝试解析标准消息类型
+            if (Enum.TryParse<MessageType>(cmd, out var messageType))
+            {
+                // 使用映射字典创建消息对象
+                if (MessageTypeMap.TryGetValue(messageType, out var factory))
+                    return factory(jObj);
+            }
+
+            // 默认返回基础消息对象
+            return new DefaultMessage(jObj);
+        }
 
         /// <summary>
-        /// 处理消息,具体的类型处理
+        /// 处理消息并触发相应事件
+        /// 统一的消息处理逻辑，用于事件触发
         /// </summary>
-        /// <param name="type">操作码</param>
-        /// <param name="buffer">字节流</param>
+        /// <param name="rawMessage">原始 JSON 消息字符串</param>
+        /// <param name="messageObj">已解析的消息对象（可选，如果为 null 则重新解析）</param>
+        private void ProcessMessageAndTriggerEvent(string rawMessage, IBaseMessage messageObj = null)
+        {
+            // 如果外部处理了原始消息，则不再继续处理
+            if (ReceiveRawMessage?.Invoke(_roomId, rawMessage) == true)
+                return;
+
+            // 如果没有提供消息对象，则解析原始消息
+            messageObj ??= ParseMessage(rawMessage);
+
+            var cmd = messageObj.Metadata.Value<string>("cmd");
+
+            // 处理特殊的 DANMU_MSG 变体
+            if (cmd.StartsWith("DANMU_MSG"))
+            {
+                ReceiveMessage?.Invoke(_roomId, MessageType.DANMU_MSG, messageObj);
+                return;
+            }
+
+            // 处理标准消息类型
+            if (Enum.TryParse<MessageType>(cmd, out var messageType))
+            {
+                // 特殊处理：USER_TOAST_MSG 需要同时触发 GUARD_BUY 事件
+                if (messageType == MessageType.USER_TOAST_MSG)
+                {
+                    ReceiveMessage?.Invoke(_roomId, MessageType.GUARD_BUY, messageObj);
+                }
+
+                ReceiveMessage?.Invoke(_roomId, messageType, messageObj);
+            }
+        }
+
+        /// <summary>
+        /// 处理消息，具体的类型处理（旧版本方法，已被新的统一处理逻辑替代）
+        /// 保留此方法以维护向后兼容性，但建议使用新的 ProcessMessageAndTriggerEvent 方法
+        /// </summary>
+        /// <param name="type">操作码，指示消息的类型</param>
+        /// <param name="buffer">消息内容的字节流</param>
         private void HandleMsg(OperateType type, byte[] buffer)
         {
             switch (type)
             {
                 case OperateType.SendHeartBeat:
+                    // 心跳包发送，无需处理
                     break;
                 case OperateType.Hot:
+                    // 人气值消息
                     var hot = EndianBitConverter.BigEndian.ToUInt32(buffer, 0);
                     ReceiveMessage?.Invoke(_roomId, MessageType.NONE, null);
                     break;
                 case OperateType.DetailCommand:
-
+                    // 详细命令消息，包含弹幕、礼物等各种事件
                     var json = Encoding.UTF8.GetString(buffer, 0, buffer.Length);
-                    Console.WriteLine(json);
-                    var jObj = JObject.Parse(json);
 
-                    if (!jObj.ContainsKey("cmd")) return;
-
-                    var cmd = jObj.Value<string>("cmd");
-
-                    if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
-                        switch (cmdCommand)
-                        {
-                            case MessageType.DANMU_MSG:
-                                {
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.DANMU_MSG, new DanmuMessage(jObj));
-                                }
-                                break;
-                            case MessageType.SEND_GIFT:
-                                {
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.SEND_GIFT, new GiftMessage(jObj));
-                                }
-                                break;
-                            case MessageType.WELCOME:
-
-                                break;
-                            case MessageType.WELCOME_GUARD:
-                                break;
-                            case MessageType.SYS_MSG:
-                                break;
-                            case MessageType.PREPARING:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.PREPARING, new DefaultMessage(json));
-                                break;
-                            case MessageType.LIVE:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.LIVE, new DefaultMessage(json));
-                                break;
-                            case MessageType.WISH_BOTTLE:
-                                break;
-                            case MessageType.INTERACT_WORD:
-                                {
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.INTERACT_WORD, new InteractWordMessage(jObj));
-                                    break;
-                                }
-                            case MessageType.ONLINE_RANK_COUNT:
-                                {
-                                    var rank = jObj["data"]["count"].Value<string>();
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.ONLINE_RANK_COUNT, new OnlineRankChangeMessage(jObj));
-                                }
-                                break;
-                            case MessageType.NOTICE_MSG:
-                                break;
-                            case MessageType.STOP_LIVE_ROOM_LIST:
-                                break;
-                            case MessageType.WATCHED_CHANGE:
-                                {
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.WATCHED_CHANGE, new WatchNumChangeMessage(jObj));
-                                }
-                                break;
-                            case MessageType.ROOM_REAL_TIME_MESSAGE_UPDATE:
-                                break;
-                            case MessageType.LIVE_INTERACTIVE_GAME:
-                                break;
-                            case MessageType.HOT_RANK_CHANGED:
-                                {
-                                    var rank = jObj["data"]["rank"].Value<string>();
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.HOT_RANK_CHANGED, new DefaultMessage(json));
-                                }
-                                break;
-                            case MessageType.HOT_ROOM_NOTIFY:
-                                break;
-                            case MessageType.HOT_RANK_CHANGED_V2:
-                                {
-                                    var rank = jObj["data"]["rank"].Value<string>();
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.HOT_RANK_CHANGED_V2, new DefaultMessage(json));
-                                }
-                                break;
-                            case MessageType.ONLINE_RANK_TOP3:
-                                {
-                                    var list = jObj["data"]["list"].ToList();
-                                    ReceiveMessage?.Invoke(_roomId, MessageType.ONLINE_RANK_TOP3, new DefaultMessage(json));
-                                }
-                                break;
-                            case MessageType.ONLINE_RANK_V2:
-                                {
-                                    var list = jObj["data"]["list"];
-                                }
-                                break;
-                            case MessageType.COMBO_SEND:
-                                {
-                                    var action = jObj["data"]["action"].Value<string>();
-                                    var gift = jObj["data"]["gift_name"].Value<string>();
-                                    var sendUser = jObj["data"]["uname"].Value<string>();
-                                    var combo = jObj["data"]["combo_num"].Value<int>();
-                                }
-                                break;
-                            case MessageType.ENTRY_EFFECT:
-
-                                break;
-                            case MessageType.SUPER_CHAT_MESSAGE:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.SUPER_CHAT_MESSAGE, new SuperChatMessage(jObj));
-                                break;
-                            case MessageType.SUPER_CHAT_MESSAGE_JP:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.SUPER_CHAT_MESSAGE, new SuperChatMessage(jObj));
-                                break;
-                            case MessageType.ROOM_CHANGE:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.ROOM_CHANGE, new RoomChangeMessage(jObj));
-                                break;
-                            case MessageType.USER_TOAST_MSG:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.GUARD_BUY, new GuardBuyMessage(jObj));
-                                ReceiveMessage?.Invoke(_roomId, MessageType.USER_TOAST_MSG, new GuardBuyMessage(jObj));
-                                break;
-                            case MessageType.ROOM_BLOCK_MSG:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.ROOM_BLOCK_MSG, new BlockMessage(jObj));
-                                break;
-                            case MessageType.LIKE_INFO_V3_UPDATE:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.LIKE_INFO_V3_UPDATE, new LikeChangeMessage(jObj));
-                                break;
-                            case MessageType.USER_VIRTUAL_MVP:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.USER_VIRTUAL_MVP, new VirtualMVPMessage(jObj));
-                                break;
-                            case MessageType.WARNING:
-                                ReceiveMessage?.Invoke(_roomId, MessageType.WARNING, new WarnMessage(jObj));
-                                break;
-                            case MessageType.NONE:
-                            default:
-                                ReceiveMessage?.Invoke(_roomId, cmdCommand, new BaseMessage(jObj));
-                                break;
-                        }
-                    else if (cmd.StartsWith("DANMU_MSG"))
-                        ReceiveMessage?.Invoke(_roomId, MessageType.DANMU_MSG, new DanmuMessage(jObj));
+                    // 使用新的统一处理逻辑
+                    ProcessMessageAndTriggerEvent(json);
                     break;
                 case OperateType.AuthAndJoinRoom:
+                    // 认证和加入房间响应，无需处理
                     break;
                 case OperateType.ReceiveHeartBeat:
+                    // 心跳包接收响应，无需处理
                     break;
                 default:
                     break;
             }
         }
+        /// <summary>
+        /// 处理命令消息
+        /// 解析 JSON 消息并触发相应的事件
+        /// </summary>
+        /// <param name="json">原始 JSON 消息字符串</param>
         private void HandleCmd(string json)
         {
-            var danmaku = GetDanmakuFromRawMessage(json);
-            var cmd = danmaku.Metadata.Value<string>("cmd");
-            if (ReceiveRawMessage?.Invoke(_roomId, json) == true)
-            {
-                return; // 如果有RawMessage事件处理，则不再继续处理
-            }
-
-            if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
-                switch (cmdCommand)
-                {
-                    case MessageType.DANMU_MSG:
-                        {
-                            ReceiveMessage?.Invoke(_roomId, MessageType.DANMU_MSG, danmaku);
-                        }
-                        break;
-                    case MessageType.SEND_GIFT:
-                        {
-                            ReceiveMessage?.Invoke(_roomId, MessageType.SEND_GIFT, danmaku);
-                        }
-                        break;
-                    case MessageType.WELCOME:
-
-                        break;
-                    case MessageType.WELCOME_GUARD:
-                        break;
-                    case MessageType.SYS_MSG:
-                        break;
-                    case MessageType.PREPARING:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.PREPARING, danmaku);
-                        break;
-                    case MessageType.LIVE:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.LIVE, danmaku);
-                        break;
-                    case MessageType.WISH_BOTTLE:
-                        break;
-                    case MessageType.INTERACT_WORD:
-                        {
-                            ReceiveMessage?.Invoke(_roomId, MessageType.INTERACT_WORD, danmaku);
-                            break;
-                        }
-                    case MessageType.ONLINE_RANK_COUNT:
-                        {
-                            // var rank = jObj["data"]["count"].Value<string>();
-                            ReceiveMessage?.Invoke(_roomId, MessageType.ONLINE_RANK_COUNT, danmaku);
-                        }
-                        break;
-                    case MessageType.NOTICE_MSG:
-                        break;
-                    case MessageType.STOP_LIVE_ROOM_LIST:
-                        break;
-                    case MessageType.WATCHED_CHANGE:
-                        {
-                            ReceiveMessage?.Invoke(_roomId, MessageType.WATCHED_CHANGE, danmaku);
-                        }
-                        break;
-                    case MessageType.ROOM_REAL_TIME_MESSAGE_UPDATE:
-                        break;
-                    case MessageType.LIVE_INTERACTIVE_GAME:
-                        break;
-                    case MessageType.HOT_RANK_CHANGED:
-                        {
-                            //var rank = jObj["data"]["rank"].Value<string>();
-                            ReceiveMessage?.Invoke(_roomId, MessageType.HOT_RANK_CHANGED, danmaku);
-                        }
-                        break;
-                    case MessageType.HOT_ROOM_NOTIFY:
-                        break;
-                    case MessageType.HOT_RANK_CHANGED_V2:
-                        {
-                            // var rank = jObj["data"]["rank"].Value<string>();
-                            ReceiveMessage?.Invoke(_roomId, MessageType.HOT_RANK_CHANGED_V2, danmaku);
-                        }
-                        break;
-                    case MessageType.ONLINE_RANK_TOP3:
-                        {
-                            // var list = jObj["data"]["list"].ToList();
-                            ReceiveMessage?.Invoke(_roomId, MessageType.ONLINE_RANK_TOP3, danmaku);
-                        }
-                        break;
-                    case MessageType.ONLINE_RANK_V2:
-                        {
-                            //var list = jObj["data"]["list"];
-                        }
-                        break;
-                    case MessageType.COMBO_SEND:
-                        {
-                            /*var action = jObj["data"]["action"].Value<string>();
-                            var gift = jObj["data"]["gift_name"].Value<string>();
-                            var sendUser = jObj["data"]["uname"].Value<string>();
-                            var combo = jObj["data"]["combo_num"].Value<int>();*/
-                        }
-                        break;
-                    case MessageType.ENTRY_EFFECT:
-
-                        break;
-                    case MessageType.SUPER_CHAT_MESSAGE:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.SUPER_CHAT_MESSAGE, danmaku);
-                        break;
-                    case MessageType.SUPER_CHAT_MESSAGE_JP:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.SUPER_CHAT_MESSAGE, danmaku);
-                        break;
-                    case MessageType.ROOM_CHANGE:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.ROOM_CHANGE, danmaku);
-                        break;
-                    case MessageType.USER_TOAST_MSG:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.GUARD_BUY, danmaku);
-                        ReceiveMessage?.Invoke(_roomId, MessageType.USER_TOAST_MSG, danmaku);
-                        break;
-                    case MessageType.ROOM_BLOCK_MSG:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.ROOM_BLOCK_MSG, danmaku);
-                        break;
-                    case MessageType.LIKE_INFO_V3_UPDATE:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.LIKE_INFO_V3_UPDATE, danmaku);
-                        break;
-                    case MessageType.USER_VIRTUAL_MVP:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.USER_VIRTUAL_MVP, danmaku);
-                        break;
-                    case MessageType.WARNING:
-                        ReceiveMessage?.Invoke(_roomId, MessageType.WARNING, danmaku);
-                        break;
-                    case MessageType.NONE:
-                    default:
-                        ReceiveMessage?.Invoke(_roomId, cmdCommand, danmaku);
-                        break;
-                }
-            else if (cmd.StartsWith("DANMU_MSG"))
-                ReceiveMessage?.Invoke(_roomId, MessageType.DANMU_MSG, danmaku);
+            // 使用统一的消息处理逻辑
+            ProcessMessageAndTriggerEvent(json);
         }
+        /// <summary>
+        /// 从原始消息字符串获取弹幕消息对象
+        /// 解析 JSON 消息并返回对应的消息对象实例
+        /// </summary>
+        /// <param name="rawMessage">原始 JSON 消息字符串</param>
+        /// <returns>解析后的消息对象</returns>
         public static IBaseMessage GetDanmakuFromRawMessage(string rawMessage)
         {
-            //Console.WriteLine(json);
-            var jObj = JObject.Parse(rawMessage);
-            if (!jObj.ContainsKey("cmd")) return new DefaultMessage(jObj);
-            var cmd = jObj.Value<string>("cmd");
-
-            if (Enum.TryParse<MessageType>(cmd, out var cmdCommand))
-            {
-                switch (cmdCommand)
-                {
-                    case MessageType.DANMU_MSG:
-                        return new DanmuMessage(jObj);
-                    case MessageType.SEND_GIFT:
-                        return new GiftMessage(jObj);
-                    case MessageType.WELCOME:
-
-                        break;
-                    case MessageType.WELCOME_GUARD:
-                        break;
-                    case MessageType.SYS_MSG:
-                        break;
-                    case MessageType.PREPARING:
-                        return new DefaultMessage(jObj);
-                    case MessageType.LIVE:
-                        return new DefaultMessage(jObj);
-                    case MessageType.WISH_BOTTLE:
-                        break;
-                    case MessageType.INTERACT_WORD:
-                        return new InteractWordMessage(jObj);
-                    case MessageType.ONLINE_RANK_COUNT:
-                        return new OnlineRankChangeMessage(jObj);
-                    case MessageType.NOTICE_MSG:
-                        break;
-                    case MessageType.STOP_LIVE_ROOM_LIST:
-                        break;
-                    case MessageType.WATCHED_CHANGE:
-                        return new WatchNumChangeMessage(jObj);
-                    case MessageType.ROOM_REAL_TIME_MESSAGE_UPDATE:
-                        break;
-                    case MessageType.LIVE_INTERACTIVE_GAME:
-                        break;
-                    case MessageType.HOT_RANK_CHANGED:
-                        return new DefaultMessage(jObj);
-                    case MessageType.HOT_ROOM_NOTIFY:
-                        break;
-                    case MessageType.HOT_RANK_CHANGED_V2:
-                        return new DefaultMessage(jObj);
-                    case MessageType.ONLINE_RANK_TOP3:
-                        return new DefaultMessage(jObj);
-                    case MessageType.ONLINE_RANK_V2:
-                        {
-                            var list = jObj["data"]["list"];
-                        }
-                        break;
-                    case MessageType.COMBO_SEND:
-                        {
-                            var action = jObj["data"]["action"].Value<string>();
-                            var gift = jObj["data"]["gift_name"].Value<string>();
-                            var sendUser = jObj["data"]["uname"].Value<string>();
-                            var combo = jObj["data"]["combo_num"].Value<int>();
-                        }
-                        break;
-                    case MessageType.ENTRY_EFFECT:
-
-                        break;
-                    case MessageType.SUPER_CHAT_MESSAGE:
-                        return new SuperChatMessage(jObj);
-                    case MessageType.SUPER_CHAT_MESSAGE_JP:
-                        return new SuperChatMessage(jObj);
-                    case MessageType.ROOM_CHANGE:
-                        return new RoomChangeMessage(jObj);
-                    case MessageType.USER_TOAST_MSG:
-                        return new GuardBuyMessage(jObj);
-                    case MessageType.ROOM_BLOCK_MSG:
-                        return new BlockMessage(jObj);
-                    case MessageType.LIKE_INFO_V3_UPDATE:
-                        return new LikeChangeMessage(jObj);
-                    case MessageType.USER_VIRTUAL_MVP:
-                        return new VirtualMVPMessage(jObj);
-                    case MessageType.WARNING:
-                        return new WarnMessage(jObj);
-                        //case MessageType.NONE:
-                }
-            }
-            else if (cmd.StartsWith("DANMU_MSG"))
-                return new DanmuMessage(jObj);
-            return new DefaultMessage(jObj);
+            // 使用统一的消息解析逻辑
+            return ParseMessage(rawMessage);
         }
 
         /// <summary>
@@ -1013,7 +896,8 @@ namespace BDanMuLib
             }
         }
         /// <summary>
-        /// 断开连接
+        /// 断开与弹幕服务器的连接
+        /// 清理连接资源并触发断开连接事件
         /// </summary>
         public void Disconnect()
         {

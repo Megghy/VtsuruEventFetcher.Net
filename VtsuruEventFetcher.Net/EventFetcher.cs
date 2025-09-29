@@ -1,7 +1,8 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Linq;
 using MessagePack;
 using Microsoft.AspNetCore.SignalR.Client;
 using Newtonsoft.Json;
@@ -26,47 +27,25 @@ namespace VtsuruEventFetcher.Net
         public const string UNABLE_UPLOAD_EVENT = "UnableUploadEvent";
         public const string UNABLE_CONNECTTOHUB = "UnableConnectToHub";
     }
-    public static partial class EventFetcher
+    public class EventFetcher
     {
-        static void Log(string msg)
-            => Utils.Log(msg);
+        private string _labelCache;
 
-        public static string VTSURU_TOKEN { get; private set; }
-        public static string? COOKIE_CLOUD_KEY { get; private set; }
-        public static string? COOKIE_CLOUD_PASSWORD { get; private set; }
-        public static string? COOKIE_CLOUD_HOST { get; private set; }
-        public static string? BILI_COOKIE { get; private set; }
+        internal void Log(string msg)
+            => Utils.Log($"[{GetInstanceLabel()}] {msg}");
+
+        public string VTsuruToken { get; private set; }
+        public static string? COOKIE_CLOUD_KEY { get; internal set; }
+        public static string? COOKIE_CLOUD_PASSWORD { get; internal set; }
+        public static string? COOKIE_CLOUD_HOST { get; internal set; }
+        public static string? BILI_COOKIE { get; internal set; }
 
         public const string VTSURU_DEFAULT_URL = "https://vtsuru.suki.club/";
         public const string VTSURU_FAILOVER_URL = "https://failover-api.vtsuru.suki.club/";
 
-        public static readonly bool IsDockerEnv = File.Exists("/.dockerenv")
-                                  || IsDockerCGroupPresent()
-                                  || Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
 
-        static bool IsDockerCGroupPresent()
-        {
-            try
-            {
-                string[] lines = File.ReadAllLines("/proc/self/cgroup");
-                foreach (var line in lines)
-                {
-                    if (line.Contains("docker") || line.Contains("kubepods"))
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch (Exception)
-            {
-                // Handle exceptions if needed
-            }
-
-            return false;
-        }
-
-        private static int failUseCount = 0;
-        public static string VTSURU_URL
+        private int failUseCount = 0;
+        public string VTSURU_URL
         {
             get
             {
@@ -85,7 +64,7 @@ namespace VtsuruEventFetcher.Net
                 }
             }
         }
-        private static void OnFail()
+        private void OnFail()
         {
             if (failUseCount <= 0)
             {
@@ -94,141 +73,61 @@ namespace VtsuruEventFetcher.Net
             failUseCount = 3;
         }
 
-        public static string VTSURU_API_URL => VTSURU_URL + "api/";
-        public static string VTSURU_HUB_URL => VTSURU_URL + "hub/";
-        public static string VTSURU_EVENT_URL => VTSURU_API_URL + "event/";
+        public string VTSURU_API_URL => VTSURU_URL + "api/";
+        public string VTSURU_HUB_URL => VTSURU_URL + "hub/";
+        public string VTSURU_EVENT_URL => VTSURU_API_URL + "event/";
 
         private static readonly string _osInfo = Environment.OSVersion.ToString();
         private static readonly string _version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
 
-        public static readonly string User_Agent = $"VTsuruEventFetcher/{_version} ({_osInfo}) {(accountInfo is null ? "" : $"{accountInfo["data"]?["name"]}/{uId}")}";
+        internal System.Timers.Timer _timer;
+        internal List<string> _events = [];
+        internal Dictionary<string, string> Errors = [];
+        internal ILogger<VTsuruEventFetcherWorker> _logger;
+        internal HubConnection _hub;
+        internal IDanmakuClient _client;
 
-        internal static System.Timers.Timer _timer;
-        internal static List<string> _events = [];
-        internal static Dictionary<string, string> Errors = [];
-        internal static ILogger<VTsuruEventFetcherWorker> _logger;
-        internal static HubConnection _hub;
-        internal static IDanmakuClient _client;
+        internal DateTime lastUploadEvent = DateTime.MinValue;
+        internal TimeSpan uploadIntervalWhenEmpty = TimeSpan.FromMinutes(1);
+        internal JToken accountInfo;
+        internal long uId;
+        internal long roomId;
+        internal string code;
 
-        internal static DateTime lastUploadEvent = DateTime.MinValue;
-        internal static TimeSpan uploadIntervalWhenEmpty = TimeSpan.FromMinutes(1);
-        internal static JToken accountInfo;
-        internal static long uId;
-        internal static long roomId;
-        internal static string code;
+        private DateTime _lastCheckLogTime = DateTime.Now;
 
-        private static DateTime _lastCheckLogTime = DateTime.Now;
-
-        public static bool UsingCookie
+        public bool UsingCookie
             => !string.IsNullOrEmpty(BILI_COOKIE) || (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD));
 
-        public static void Init(ILogger<VTsuruEventFetcherWorker> logger)
+        public void Init(ILogger<VTsuruEventFetcherWorker> logger, string? token)
         {
             _logger = logger;
+            VTsuruToken = token.Trim();
+            _labelCache = null;
 
-            var tokenPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "token.txt");
-            var configPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "config.json");
-            if (File.Exists(tokenPath))
-            {
-                var text = File.ReadAllText(tokenPath).Trim();
-                var config = new Config()
-                {
-                    Token = text
-                };
-                File.WriteAllText(configPath, JsonConvert.SerializeObject(config, Formatting.Indented));
-                File.Delete(tokenPath);
-                Log($"尝试将token文件转换为json配置文件");
-            }
-            if (File.Exists(configPath))
-            {
-                try
-                {
-                    var config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(configPath));
-                    VTSURU_TOKEN = config.Token;
-                    COOKIE_CLOUD_KEY = config.CookieCloudKey;
-                    COOKIE_CLOUD_PASSWORD = config.CookieCloudPassword;
-                    COOKIE_CLOUD_HOST = config.CookieCloudHost;
-                    BILI_COOKIE = config.Cookie;
-                }
-                catch (Exception ex)
-                {
-                    Log($"读取配置文件失败: {ex}");
-                    Environment.Exit(0);
-                }
-            }
+            
 
-            if (Environment.GetEnvironmentVariable("VTSURU_TOKEN")?.Trim() is { Length: > 0 } token)
-            {
-                VTSURU_TOKEN = token;
-            }
-            if (Environment.GetEnvironmentVariable("BILI_COOKIE")?.Trim() is { Length: > 0 } cookie)
-            {
-                BILI_COOKIE = cookie;
-            }
-
-            if (Environment.GetEnvironmentVariable("COOKIE_CLOUD")?.Trim() is { Length: > 0 } cookieCloud)
-            {
-                if (!cookieCloud.Contains('@'))
-                {
-                    _logger.LogError($"无效的 CookieCloud 秘钥, 应为 KEY@PASSWORD (用户key + @ + 端到端加密密码)");
-                    Environment.Exit(0);
-                }
-                else
-                {
-                    COOKIE_CLOUD_KEY = cookieCloud.Split('@')[0];
-                    COOKIE_CLOUD_PASSWORD = cookieCloud.Split('@')[1];
-                }
-            }
-
-            if (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD))
-            {
-                Log("已设置 CookieCloud, 将从云端获取 Cookie");
-            }
-            else if (!string.IsNullOrEmpty(BILI_COOKIE))
-            {
-                Log("已设置逸站 Cookie, 将使用你的账户连接直播间");
-            }
-            else
-            {
-                Log("未设置 Cookie 或 CookieCloud, 将使用开放平台进行连接");
-            }
-
-            COOKIE_CLOUD_HOST ??= Environment.GetEnvironmentVariable("COOKIE_CLOUD_HOST")?.Trim();
-            if (!string.IsNullOrEmpty(COOKIE_CLOUD_HOST))
-            {
-                try
-                {
-                    var u = new Uri(COOKIE_CLOUD_HOST);
-                    Log($"已设置 CookieCloud 自定义域名为: {COOKIE_CLOUD_HOST}");
-                }
-                catch
-                {
-                    _logger.LogError($"无效的自定义 CookieCloud Host");
-                    Environment.Exit(0);
-                }
-            }
-
-            if (string.IsNullOrEmpty(VTSURU_TOKEN))
+            if (string.IsNullOrEmpty(VTsuruToken))
             {
                 Log($"未提供 Token");
-                Environment.Exit(0);
+                throw new InvalidOperationException("未提供 Token");
             }
             if (!GetSelfInfoAsync().Result)
             {
                 Log("提供的 Token 无效");
-                Environment.Exit(0);
+                throw new InvalidOperationException("提供的 Token 无效");
             }
 
-            Log("VTsuru Token: " + VTSURU_TOKEN);
+            Log("VTsuru Token: " + MaskToken(token));
 
             _ = ConnectHub();
 
-            var timer = new System.Timers.Timer()
+            _timer = new System.Timers.Timer()
             {
                 AutoReset = true,
                 Interval = 1000,
             };
-            timer.Elapsed += (e, args) =>
+            _timer.Elapsed += (e, args) =>
             {
                 if (_lastCheckLogTime < DateTime.Now - TimeSpan.FromMinutes(1))
                 {
@@ -241,36 +140,15 @@ namespace VtsuruEventFetcher.Net
                     lastUploadEvent = DateTime.Now;
                 }
             };
-            timer.Start();
+            _timer.Start();
 
-            var port = Environment.GetEnvironmentVariable("PORT");
-            if (!string.IsNullOrEmpty(port))
-            {
-                _ = Task.Run(async () =>
-                {
-                    var listener = new HttpListener();
-                    listener.Prefixes.Add($"http://*:{port}/");
-                    listener.Start();
-                    Console.WriteLine($"正在监听端口以通过健康监测: {port}");
-
-                    while (true)
-                    {
-                        var context = await listener.GetContextAsync();
-                        var response = context.Response;
-                        var responseString = "VTsuruEventFetcher";
-                        var buffer = Encoding.UTF8.GetBytes(responseString);
-                        response.ContentLength64 = buffer.Length;
-                        await response.OutputStream.WriteAsync(buffer);
-                        response.OutputStream.Close();
-                    }
-                });
-            }
+            // 健康检查端口监听改由 Worker 统一管理，避免多实例端口冲突
         }
-        public static async Task<bool> GetSelfInfoAsync()
+        public async Task<bool> GetSelfInfoAsync()
         {
             try
             {
-                var response = await Utils.GetAsync($"{VTSURU_API_URL}account/self?token={VTSURU_TOKEN}");
+                var response = await Utils.GetAsync($"{VTSURU_API_URL}account/self?token={VTsuruToken}");
                 var res = JObject.Parse(response);
 
                 if ((int)res["code"] == 200)
@@ -305,15 +183,15 @@ namespace VtsuruEventFetcher.Net
 
             return false;
         }
-        static bool isFirst = true;
-        static bool isDisconnectByServer = false;
+        bool isFirst = true;
+        bool isDisconnectByServer = false;
         static readonly Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
         record SendEventModel(IEnumerable<string> Events, Dictionary<string, string> Error, Version CurrentVersion);
         public record ResponseEventModelV3(string Code, Version DotnetVersion, int EventCount);
 
-        static long _addEventErrorCount = 0;
-        static bool isConnectingHub = false;
-        private static async Task ConnectHub()
+        long _addEventErrorCount = 0;
+        bool isConnectingHub = false;
+        private async Task ConnectHub()
         {
             if (isConnectingHub)
             {
@@ -349,7 +227,7 @@ namespace VtsuruEventFetcher.Net
             void CreateConnection()
             {
                 connection = new HubConnectionBuilder()
-                .WithUrl(VTSURU_HUB_URL + $"event-fetcher?token={VTSURU_TOKEN}")
+                .WithUrl(VTSURU_HUB_URL + $"event-fetcher?token={VTsuruToken}")
                 .WithAutomaticReconnect()
                 .AddMessagePackProtocol()
                 .Build();
@@ -378,7 +256,7 @@ namespace VtsuruEventFetcher.Net
             isConnectingHub = false;
             Errors.Remove(ErrorCodes.UNABLE_CONNECTTOHUB);
         }
-        async static Task OnHubClosed(Exception error)
+        async Task OnHubClosed(Exception error)
         {
             if (isDisconnectByServer || error is null)
             {
@@ -390,12 +268,12 @@ namespace VtsuruEventFetcher.Net
             await Task.Delay(new Random().Next(0, 5) * 1000);
             await ConnectHub();
         }
-        static bool isUploading = false;
+        bool isUploading = false;
         [MessagePackObject(keyAsPropertyName: true)]
         public record RequestUploadEvents(string[] Events, Dictionary<string, string> Error, Version? CurrentVersion, string OSInfo, bool UseCookie);
         [MessagePackObject(keyAsPropertyName: true)]
         public record ResponseUploadEvents(bool Success, string Message, Version Version, int EventCount);
-        public static async Task<bool> SendEventAsync()
+        public async Task<bool> SendEventAsync()
         {
             if (_hub is null || _hub.State is not HubConnectionState.Connected || isUploading)
             {
@@ -494,7 +372,7 @@ namespace VtsuruEventFetcher.Net
         /// <param name="body"></param>
         /// <param name="useCookie"></param>
         /// <returns></returns>
-        public static async Task<ResponseClientRequestData> RequestAsync(string url, string method = "GET", string body = null, bool useCookie = true)
+        public async Task<ResponseClientRequestData> RequestAsync(string url, string method = "GET", string body = null, bool useCookie = true)
         {
             using var client = new HttpClient();
             try
@@ -534,8 +412,8 @@ namespace VtsuruEventFetcher.Net
                 return new(false, $"请求失败: {ex.Message}", string.Empty);
             }
         }
-        static bool isIniting = false;
-        async static Task InitChatClientAsync()
+        bool isIniting = false;
+        async Task InitChatClientAsync()
         {
             if (isIniting)
             {
@@ -555,11 +433,11 @@ namespace VtsuruEventFetcher.Net
 
                 if (UsingCookie)
                 {
-                    _client = new CookieClient(BILI_COOKIE, COOKIE_CLOUD_KEY, COOKIE_CLOUD_PASSWORD, COOKIE_CLOUD_HOST);
+                    _client = new CookieClient(this, BILI_COOKIE, COOKIE_CLOUD_KEY, COOKIE_CLOUD_PASSWORD, COOKIE_CLOUD_HOST);
                 }
                 else
                 {
-                    _client = new OpenLiveClient();
+                    _client = new OpenLiveClient(this);
                 }
                 while (true)
                 {
@@ -586,15 +464,63 @@ namespace VtsuruEventFetcher.Net
             }
 
         }
-        static void RestartRoom()
+        void RestartRoom()
         {
             _client?.Dispose();
 
             _ = InitChatClientAsync();
         }
-        public static void AddEvent(string e)
+        public void AddEvent(string e)
         {
             _events.Add(e);
+        }
+
+        public async Task StopAsync()
+        {
+            try
+            {
+                _timer?.Stop();
+                _timer?.Dispose();
+                _timer = null;
+            }
+            catch { }
+            try
+            {
+                _client?.Dispose();
+                _client = null;
+            }
+            catch { }
+            try
+            {
+                if (_hub is not null)
+                {
+                    await _hub.DisposeAsync();
+                    _hub = null;
+                }
+            }
+            catch { }
+        }
+
+        public string GetInstanceLabel()
+        {
+            if (!string.IsNullOrWhiteSpace(_labelCache))
+            {
+                return _labelCache;
+            }
+
+            _labelCache = accountInfo?["name"]?.ToString() ?? $"Token:{MaskToken(VTsuruToken)}";
+            return _labelCache;
+        }
+
+        public static string MaskToken(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return "Unknown";
+            }
+
+            var suffixLength = Math.Min(4, token.Length);
+            return $"{token[..suffixLength]}***";
         }
     }
 }

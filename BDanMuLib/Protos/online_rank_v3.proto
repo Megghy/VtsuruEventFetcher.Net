@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package bilibili.live;
+
+option csharp_namespace = "BDanMuLib.Protos";
+
+// 高能用户列表 v3
+// @since Jul 5, 2025
+message OnlineRankV3 {
+  // @example online_rank
+  string rank_type = 1;
+
+  message OnlineList {
+    uint64 uid = 1;
+    string face = 2;
+    // 贡献值，打赏电池数，string 格式😅
+    string score = 3;
+    string uname = 4;
+    // 当前排名
+    uint32 rank = 5;
+    optional uint32 guard_level = 6;
+    optional bool is_mystery = 7;
+
+    // UInfo
+    optional UInfo uinfo = 8;
+    message UInfo {
+      uint64 uid = 1;
+
+      Base base = 2;
+      message Base {
+        string name = 1;
+        string face = 2;
+        uint32 name_color = 3;
+        bool is_mystery = 4;
+
+        // Not in use, commented out for simplicity
+        // optional RiskCtrlInfo risk_ctrl_info = 5;
+        // message RiskCtrlInfo {
+        //   string name = 1;
+        //   string face = 2;
+        // }
+
+        // Not in use, commented out for simplicity
+        // optional OriginInfo origin_info = 6;
+        // message OriginInfo {
+        //   string name = 1;
+        //   string face = 2;
+        // }
+      }
+
+      optional Guard guard = 6;
+      message Guard {
+        uint32 level = 1;
+        // @example 2025-08-30 23:59:59
+        string expired_str = 2;
+      }
+    }
+  }
+
+  repeated OnlineList online_list = 3;
+}

@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package bilibili.live;
+
+option csharp_namespace = "BDanMuLib.Protos";
+
+// 互动事件
+// @since Jul 4, 2025
+message InteractWordV2 {
+  uint64 uid = 1;
+  string username = 2;
+  uint32 msg_type = 5;
+  uint32 room_id = 6;
+  uint32 timestamp = 7;
+  uint64 timestamp_ms = 8;
+
+  // 粉丝牌
+  optional Medal medal = 9;
+  message Medal {
+    uint64 ruid = 1;
+    uint32 level = 2;
+    string name = 3;
+    int32 f4 = 4;
+    int32 f5 = 5;
+    int32 f6 = 6;
+    int32 f7 = 7;
+    uint32 is_lighted = 8;
+    uint32 guard_level = 9;
+    uint32 room_id = 12;
+    int32 f13 = 13;
+  }
+  uint64 trigger_time = 15;
+  uint32 guard_type = 16;
+  int32 f17 = 17;
+
+  // UInfo
+  UInfo uinfo = 22;
+  message UInfo {
+    uint64 uid = 1;
+
+    Base base = 2;
+    message Base {
+      string username = 1;
+      string avatar = 2;
+      string f3 = 3;
+    }
+    optional Medal medal = 3;
+    message Medal {
+      // @example 奶糖花
+      string name = 1;
+      // level
+      uint32 level = 2;
+      int32 color_start = 3;
+      int32 color_end = 4;
+      int32 color_border = 5;
+      int32 color = 6;
+      int32 id = 7;
+      int32 f9 = 9;
+      uint64 ruid = 10;
+      int32 f11 = 11;
+      int32 f12 = 12;
+      optional string guard_icon = 13;
+      // @example #4775EFCC
+      uint32 v2_medal_color_start = 15;
+      // @example #4775EFCC
+      uint32 v2_medal_color_end = 16;
+      // @example #58A1F8FF
+      uint32 v2_medal_color_border = 17;
+      // @example #FFFFFFFF
+      uint32 v2_medal_text = 18;
+      // @example #000B7099
+      uint32 v2_medal_level = 19;
+    }
+
+    // 荣耀等级
+    Wealth wealth = 4;
+    message Wealth {
+      uint32 level = 1;
+      // @example ChronosWealth_5.png
+      optional string icon = 2;
+    }
+
+    Message6 f6 = 6;
+    message Message6 {
+      int32 f1 = 1;
+      // @example 2025-07-27 23:59:59
+      string f2 = 2;
+    }
+  }
+
+  optional RelationTail relation_tail = 23;
+  message RelationTail {
+    // @example https://i0.hdslb.com/bfs/live/b9de5d510125c6f14cd68391d5a4878fe16356b3.png
+    string tail_icon = 1;
+    // @example TA常看你的直播，但还没有关注
+    string tail_guide_text = 2;
+    // @example 1
+    uint32 tail_type = 3;
+  }
+}

@@ -1,5 +1,5 @@
 # First stage: build the application
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build-env
 WORKDIR /src
 
 # Copy the project files and build the release
@@ -9,7 +9,7 @@ RUN dotnet restore VtsuruEventFetcher.Net/VtsuruEventFetcher.Net.csproj
 RUN dotnet publish VtsuruEventFetcher.Net/VtsuruEventFetcher.Net.csproj -c Release -o /app --no-restore
 
 # Second stage: setup the runtime
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 EXPOSE 3000
 

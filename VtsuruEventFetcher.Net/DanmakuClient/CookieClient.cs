@@ -1,11 +1,12 @@
-﻿using System.Text;
+using System.Text;
 using BDanMuLib;
 using Newtonsoft.Json.Linq;
 
 namespace VtsuruEventFetcher.Net.DanmakuClient
 {
-    internal class CookieClient(string? cookie, string? cookieCloudKey, string? cookieCloudPassword, string? cookieCloudHost) : IDanmakuClient
+    internal class CookieClient(EventFetcher fetcher, string? cookie, string? cookieCloudKey, string? cookieCloudPassword, string? cookieCloudHost) : IDanmakuClient
     {
+        private readonly EventFetcher _fetcher = fetcher;
         bool _isRunning = false;
         DanMuCore _danmu;
         bool isConnecting = false;
@@ -18,7 +19,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
             isConnecting = true;
             try
             {
-                var danmu = new DanMuCore(DanMuCore.ClientType.Wss, EventFetcher.roomId, EventFetcher.uId, _cookie, uId);
+                var danmu = new DanMuCore(DanMuCore.ClientType.Wss, _fetcher.roomId, _fetcher.uId, _cookie, uId);
                 danmu.ReceiveRawMessage += Danmu_ReceiveRawMessage;
                 danmu.OnDisconnect += () => _ = Task.Run(OnClose);
                 if (!await danmu.ConnectAsync())
@@ -28,8 +29,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 }
                 _danmu = danmu;
                 _isRunning = true;
-                EventFetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
-                Utils.Log($"[CookieClient] 已连接直播间: {EventFetcher.roomId}");
+                _fetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                _fetcher.Log($"[CookieClient] 已连接直播间: {_fetcher.roomId}");
                 isConnecting = false;
             }
             catch
@@ -51,11 +52,11 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
             _isRunning = false;
 
-            EventFetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"Cookie 弹幕客户端已断开连接");
+            _fetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"Cookie 弹幕客户端已断开连接");
 
             Dispose();
 
-            Utils.Log($"[CookieClient] 连接断开, 将重新连接");
+            _fetcher.Log($"[CookieClient] 连接断开, 将重新连接");
             while (true)
             {
                 try
@@ -67,17 +68,17 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 catch (Exception ex)
                 {
                     Dispose();
-                    Utils.Log($"[CookieClient] 无法重新连接, 10秒后重试: {ex.Message}");
+                    _fetcher.Log($"[CookieClient] 无法重新连接, 10秒后重试: {ex.Message}");
                     Thread.Sleep(10000);
                 }
             }
-            Utils.Log($"[CookieClient] 已重新连接");
+            _fetcher.Log($"[CookieClient] 已重新连接");
         }
         private bool Danmu_ReceiveRawMessage(long roomId, string msg)
         {
             if (!string.IsNullOrEmpty(msg))
             {
-                EventFetcher.AddEvent(msg);
+                _fetcher.AddEvent(msg);
             }
             return true;
         }
@@ -109,15 +110,15 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 {
                     delayTime = 10 * 60 * 1000;
                 }
-                Utils.Log("[CookieClient] <第 " + retryCount + " 次> 无法从 CookieCloud 获取 Cookie, 60秒后重试");
+                _fetcher.Log("[CookieClient] <第 " + retryCount + " 次> 无法从 CookieCloud 获取 Cookie, 60秒后重试");
                 retryCount++;
                 await Task.Delay(delayTime);
             }
             retryCount = 0;
-            Utils.Log("[CookieClient] 已从 CookieCloud 获取 Cookie");
+            _fetcher.Log("[CookieClient] 已从 CookieCloud 获取 Cookie");
             while (!(await UpdateUserInfoAsync()))
             {
-                Utils.Log("[CookieClient] 无法获取用户信息, 10秒后重试");
+                _fetcher.Log("[CookieClient] 无法获取用户信息, 10秒后重试");
                 await Task.Delay(10000);
             }
             if (_updateCookieTimer is null)
@@ -169,25 +170,25 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                             }
                         }
                         _cookie = cookieStringBuilder.ToString();
-                        EventFetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE);
+                        _fetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE);
                         return true;
                     }
                     else
                     {
-                        Utils.Log($"[CookieClient] 已从 CookieCloud 中获取数据, 但其中不存在 BiliBili 的 Cookie");
-                        EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, "已从 CookieCloud 中获取数据, 但其中不存在 BiliBili 的 Cookie");
+                        _fetcher.Log($"[CookieClient] 已从 CookieCloud 中获取数据, 但其中不存在 BiliBili 的 Cookie");
+                        _fetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, "已从 CookieCloud 中获取数据, 但其中不存在 BiliBili 的 Cookie");
                     }
                 }
                 else
                 {
-                    Utils.Log($"[CookieClient] 无法获取 Cookie: {result.StatusCode}");
-                    EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, $"[CookieClient] 无法获取 Cookie: {result.StatusCode}");
+                    _fetcher.Log($"[CookieClient] 无法获取 Cookie: {result.StatusCode}");
+                    _fetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, $"[CookieClient] 无法获取 Cookie: {result.StatusCode}");
                 }
             }
             catch (Exception ex)
             {
-                Utils.Log($"[CookieClient] 无法获取 Cookie: {ex}");
-                EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, $"[CookieClient] 无法获取 Cookie: {ex.Message}");
+                _fetcher.Log($"[CookieClient] 无法获取 Cookie: {ex}");
+                _fetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, $"[CookieClient] 无法获取 Cookie: {ex.Message}");
             }
             return false;
         }
@@ -204,19 +205,19 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     userInfo = json["data"];
                     uId = userInfo["mid"].Value<long>();
 
-                    EventFetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO);
+                    _fetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO);
                     return true;
                 }
                 else
                 {
-                    Utils.Log($"[CookieClient] 无法获取用户信息: {json["message"]}");
-                    EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO, $"无法从 Cookie 获取用户信息: {json["message"]}");
+                    _fetcher.Log($"[CookieClient] 无法获取用户信息: {json["message"]}");
+                    _fetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO, $"无法从 Cookie 获取用户信息: {json["message"]}");
                 }
             }
             catch (Exception ex)
             {
-                Utils.Log($"[CookieClient] 无法获取用户信息: {ex}");
-                EventFetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO, $"无法从 Cookie 获取用户信息: {ex.Message}");
+                _fetcher.Log($"[CookieClient] 无法获取用户信息: {ex}");
+                _fetcher.Errors.TryAdd(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO, $"无法从 Cookie 获取用户信息: {ex.Message}");
             }
             return false;
         }

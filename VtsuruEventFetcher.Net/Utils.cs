@@ -1,4 +1,5 @@
-﻿namespace VtsuruEventFetcher.Net
+using System.Reflection;
+namespace VtsuruEventFetcher.Net
 {
     internal static class Utils
     {
@@ -10,16 +11,42 @@
             Timeout = TimeSpan.FromSeconds(5)
         };
         public static string LogPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath), "logs");
+        internal static readonly string DefaultUserAgent = $"VTsuruEventFetcher/{Assembly.GetExecutingAssembly().GetName().Version} ({Environment.OSVersion})";
+        
+        // Detect docker environment globally
+        internal static readonly bool IsDockerEnv = File.Exists("/.dockerenv")
+                                       || IsDockerCGroupPresent()
+                                       || Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+        
+        private static bool IsDockerCGroupPresent()
+        {
+            try
+            {
+                string[] lines = File.ReadAllLines("/proc/self/cgroup");
+                foreach (var line in lines)
+                {
+                    if (line.Contains("docker") || line.Contains("kubepods"))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // ignore
+            }
+            return false;
+        }
         public static async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
         {
             if (!request.Headers.Contains("User-Agent"))
-                request.Headers.Add("User-Agent", EventFetcher.User_Agent);
+                request.Headers.Add("User-Agent", DefaultUserAgent);
             return await client.SendAsync(request);
         }
         public static async Task<string?> GetAsync(string url)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("User-Agent", EventFetcher.User_Agent);
+            request.Headers.Add("User-Agent", DefaultUserAgent);
             return await (await SendAsync(request))?.Content.ReadAsStringAsync();
         }
         public static void Log(string msg)
@@ -27,7 +54,7 @@
             try
             {
                 Console.WriteLine($"{DateTime.Now:HH:mm:ss} - {msg}");
-                if (EventFetcher.IsDockerEnv)
+                if (IsDockerEnv)
                 {
                     return;
                 }
@@ -40,12 +67,12 @@
             }
             catch (Exception ex)
             {
-                EventFetcher._logger?.LogError(ex.Message, ex);
+                Console.WriteLine($"Log error: {ex.Message}");
             }
         }
         internal static void ClearLog()
         {
-            if (EventFetcher.IsDockerEnv)
+            if (IsDockerEnv)
             {
                 return;
             }
@@ -69,7 +96,7 @@
             }
             catch (Exception ex)
             {
-                EventFetcher._logger?.LogError(ex.Message, ex);
+                Console.WriteLine($"ClearLog error: {ex.Message}");
             }
         }
     }
