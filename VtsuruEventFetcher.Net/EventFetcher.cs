@@ -40,7 +40,7 @@ namespace VtsuruEventFetcher.Net
         public static string? COOKIE_CLOUD_HOST { get; internal set; }
         public static string? BILI_COOKIE { get; internal set; }
 
-        public const string VTSURU_DEFAULT_URL = "https://vtsuru.suki.club/";
+        public const string VTSURU_DEFAULT_URL = "https://api.vtsuru.suki.club/";
         public const string VTSURU_FAILOVER_URL = "https://failover-api.vtsuru.suki.club/";
 
 
