@@ -70,7 +70,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 else
                 {
                     _fetcher.Log($"[OpenLive] 已连接直播间: {_authInfo.AnchorInfo.UName}<{_authInfo.AnchorInfo.Uid}>");
-                    _fetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                    _fetcher.Errors.TryRemove(ErrorCodes.CLIENT_DISCONNECTED, out _);
                     _chatClient = WebSocketBLiveClient;
                     _isRunning = true;
                     isConnecting = false;
@@ -132,9 +132,9 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 }
                 catch (Exception ex)
                 {
-                    Dispose();
+                    Clear();
                     _fetcher.Log($"[OpenLive] 无法重新连接, 10秒后重试: {ex.Message}");
-                    Thread.Sleep(10000);
+                    await Task.Delay(10000);
                 }
             }
             isTryConnecting = false;
@@ -153,7 +153,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
                 if ((int)res["code"] == 200)
                 {
-                    _fetcher.Errors.Remove(ErrorCodes.OPEN_LIVE_UNABLE_START_GAME);
+                    _fetcher.Errors.TryRemove(ErrorCodes.OPEN_LIVE_UNABLE_START_GAME, out _);
                     return JsonConvert.DeserializeObject<AppStartData>(res["data"].ToString());
                 }
                 else

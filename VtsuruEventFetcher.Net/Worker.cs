@@ -177,12 +177,12 @@ namespace VtsuruEventFetcher.Net
             {
                 foreach (var t in tokens)
                 {
-                    _ = Task.Run(() =>
+                    _ = Task.Run(async () =>
                     {
                         try
                         {
                             var f = new EventFetcher();
-                            f.Init(_logger, t);
+                            await f.Init(_logger, t);
                             _instances.Add(f);
                             _logger.LogInformation($"启动实例成功: {f.GetInstanceLabel()}");
                         }

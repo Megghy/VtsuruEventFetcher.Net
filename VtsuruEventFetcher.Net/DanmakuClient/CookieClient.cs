@@ -29,7 +29,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 }
                 _danmu = danmu;
                 _isRunning = true;
-                _fetcher.Errors.Remove(ErrorCodes.CLIENT_DISCONNECTED);
+                _fetcher.Errors.TryRemove(ErrorCodes.CLIENT_DISCONNECTED, out _);
                 _fetcher.Log($"[CookieClient] 已连接直播间: {_fetcher.roomId}");
                 isConnecting = false;
             }
@@ -54,7 +54,8 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
 
             _fetcher.Errors.TryAdd(ErrorCodes.CLIENT_DISCONNECTED, $"Cookie 弹幕客户端已断开连接");
 
-            Dispose();
+            _danmu?.Disconnect();
+            _danmu = null;
 
             _fetcher.Log($"[CookieClient] 连接断开, 将重新连接");
             while (true)
@@ -67,9 +68,10 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                 }
                 catch (Exception ex)
                 {
-                    Dispose();
+                    _danmu?.Disconnect();
+                    _danmu = null;
                     _fetcher.Log($"[CookieClient] 无法重新连接, 10秒后重试: {ex.Message}");
-                    Thread.Sleep(10000);
+                    await Task.Delay(10000);
                 }
             }
             _fetcher.Log($"[CookieClient] 已重新连接");
@@ -170,7 +172,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                             }
                         }
                         _cookie = cookieStringBuilder.ToString();
-                        _fetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE);
+                        _fetcher.Errors.TryRemove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_COOKIE, out _);
                         return true;
                     }
                     else
@@ -205,7 +207,7 @@ namespace VtsuruEventFetcher.Net.DanmakuClient
                     userInfo = json["data"];
                     uId = userInfo["mid"].Value<long>();
 
-                    _fetcher.Errors.Remove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO);
+                    _fetcher.Errors.TryRemove(ErrorCodes.COOKIE_CLIENT_UNABLE_GET_USER_INFO, out _);
                     return true;
                 }
                 else

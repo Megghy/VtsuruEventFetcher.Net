@@ -1,8 +1,10 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Linq;
+using System.Threading;
 using MessagePack;
 using Microsoft.AspNetCore.SignalR.Client;
 using Newtonsoft.Json;
@@ -30,6 +32,7 @@ namespace VtsuruEventFetcher.Net
     public class EventFetcher
     {
         private string _labelCache;
+        private readonly object _eventsLock = new();
 
         internal void Log(string msg)
             => Utils.Log($"[{GetInstanceLabel()}] {msg}");
@@ -82,7 +85,7 @@ namespace VtsuruEventFetcher.Net
 
         internal System.Timers.Timer _timer;
         internal List<string> _events = [];
-        internal Dictionary<string, string> Errors = [];
+        internal ConcurrentDictionary<string, string> Errors = new();
         internal ILogger<VTsuruEventFetcherWorker> _logger;
         internal HubConnection _hub;
         internal IDanmakuClient _client;
@@ -99,20 +102,18 @@ namespace VtsuruEventFetcher.Net
         public bool UsingCookie
             => !string.IsNullOrEmpty(BILI_COOKIE) || (!string.IsNullOrEmpty(COOKIE_CLOUD_KEY) && !string.IsNullOrEmpty(COOKIE_CLOUD_PASSWORD));
 
-        public void Init(ILogger<VTsuruEventFetcherWorker> logger, string? token)
+        public async Task Init(ILogger<VTsuruEventFetcherWorker> logger, string? token)
         {
             _logger = logger;
             VTsuruToken = token.Trim();
             _labelCache = null;
-
-            
 
             if (string.IsNullOrEmpty(VTsuruToken))
             {
                 Log($"未提供 Token");
                 throw new InvalidOperationException("未提供 Token");
             }
-            if (!GetSelfInfoAsync().Result)
+            if (!await GetSelfInfoAsync())
             {
                 Log("提供的 Token 无效");
                 throw new InvalidOperationException("提供的 Token 无效");
@@ -134,7 +135,12 @@ namespace VtsuruEventFetcher.Net
                     _lastCheckLogTime = DateTime.Now;
                     Utils.ClearLog();
                 }
-                if (_events.Count > 0 || DateTime.Now - lastUploadEvent > uploadIntervalWhenEmpty)
+                var hasEvents = false;
+                lock (_eventsLock)
+                {
+                    hasEvents = _events.Count > 0;
+                }
+                if (hasEvents || DateTime.Now - lastUploadEvent > uploadIntervalWhenEmpty)
                 {
                     _ = SendEventAsync();
                     lastUploadEvent = DateTime.Now;
@@ -161,7 +167,7 @@ namespace VtsuruEventFetcher.Net
                     }
                     else
                     {
-                        Errors.Remove(ErrorCodes.ACCOUNT_NOT_BIND);
+                        Errors.TryRemove(ErrorCodes.ACCOUNT_NOT_BIND, out _);
                     }
                     // Assuming "self" is a variable where you want to store the data.
                     // You might want to parse res["data"] into an appropriate object.
@@ -220,6 +226,7 @@ namespace VtsuruEventFetcher.Net
                 {
                     Log(ex.ToString());
                     Errors.TryAdd(ErrorCodes.UNABLE_CONNECTTOHUB, $"无法连接至 VTsuru 服务器: {ex.Message}");
+                    try { await connection.DisposeAsync(); } catch { }
                     await Task.Delay(5000);
                     CreateConnection();
                 }
@@ -254,7 +261,7 @@ namespace VtsuruEventFetcher.Net
                 });
             }
             isConnectingHub = false;
-            Errors.Remove(ErrorCodes.UNABLE_CONNECTTOHUB);
+            Errors.TryRemove(ErrorCodes.UNABLE_CONNECTTOHUB, out _);
         }
         async Task OnHubClosed(Exception error)
         {
@@ -268,30 +275,38 @@ namespace VtsuruEventFetcher.Net
             await Task.Delay(new Random().Next(0, 5) * 1000);
             await ConnectHub();
         }
-        bool isUploading = false;
+        private int _isUploading = 0;
         [MessagePackObject(keyAsPropertyName: true)]
-        public record RequestUploadEvents(string[] Events, Dictionary<string, string> Error, Version? CurrentVersion, string OSInfo, bool UseCookie);
+        public record RequestUploadEvents(string[] Events, IDictionary<string, string> Error, Version? CurrentVersion, string OSInfo, bool UseCookie);
         [MessagePackObject(keyAsPropertyName: true)]
         public record ResponseUploadEvents(bool Success, string Message, Version Version, int EventCount);
         public async Task<bool> SendEventAsync()
         {
-            if (_hub is null || _hub.State is not HubConnectionState.Connected || isUploading)
+            if (_hub is null || _hub.State is not HubConnectionState.Connected)
             {
                 return false;
             }
-            isUploading = true;
+            if (Interlocked.Exchange(ref _isUploading, 1) == 1)
+            {
+                return false;
+            }
             try
             {
-                var tempEvents = _events.Take(30).ToArray();
+                string[] tempEvents;
+                lock (_eventsLock)
+                {
+                    tempEvents = _events.Take(30).ToArray();
+                }
                 var model = new RequestUploadEvents(tempEvents, Errors, currentVersion, _osInfo, UsingCookie);
 
                 var messagePackData = MessagePackSerializer.Serialize(model);
 
                 // 使用Brotli进行压缩
                 using var compressedData = new MemoryStream();
-                using var compressor = new BrotliStream(compressedData, CompressionMode.Compress);
-                await compressor.WriteAsync(messagePackData);
-                await compressor.FlushAsync();
+                using (var compressor = new BrotliStream(compressedData, CompressionMode.Compress, leaveOpen: true))
+                {
+                    await compressor.WriteAsync(messagePackData);
+                }
                 var data = compressedData.ToArray();
 
                 var resp = await _hub?.InvokeAsync<ResponseUploadEvents>("UploadEvents", data);
@@ -305,7 +320,14 @@ namespace VtsuruEventFetcher.Net
                     if (tempEvents.Length > 0)
                     {
                         Log($"[ADD EVENT] 已发送 {tempEvents.Length} 条事件");
-                        _events.RemoveRange(0, tempEvents.Length);
+                        lock (_eventsLock)
+                        {
+                            var removeCount = Math.Min(tempEvents.Length, _events.Count);
+                            if (removeCount > 0)
+                            {
+                                _events.RemoveRange(0, removeCount);
+                            }
+                        }
                     }
                     var responseCode = resp.Message;
                     if (!string.IsNullOrEmpty(code) && code != responseCode)
@@ -323,7 +345,7 @@ namespace VtsuruEventFetcher.Net
                         }
                         else
                         {
-                            Errors.Remove(ErrorCodes.NEW_VERSION);
+                            Errors.TryRemove(ErrorCodes.NEW_VERSION, out _);
                         }
 
                         code = responseCode;
@@ -357,9 +379,9 @@ namespace VtsuruEventFetcher.Net
                 }
                 else
                 {
-                    Errors.Remove(ErrorCodes.UNABLE_UPLOAD_EVENT);
+                    Errors.TryRemove(ErrorCodes.UNABLE_UPLOAD_EVENT, out _);
                 }
-                isUploading = false;
+                Interlocked.Exchange(ref _isUploading, 0);
             }
         }
         [MessagePackObject(keyAsPropertyName: true)]
@@ -429,7 +451,7 @@ namespace VtsuruEventFetcher.Net
                     await Task.Delay(10000);
                 }
 
-                Errors.Remove(ErrorCodes.ACCOUNT_UNABLE_GET_INFO);
+                Errors.TryRemove(ErrorCodes.ACCOUNT_UNABLE_GET_INFO, out _);
 
                 if (UsingCookie)
                 {
@@ -450,7 +472,7 @@ namespace VtsuruEventFetcher.Net
                     catch (Exception ex)
                     {
                         Utils.Log($"无法启动弹幕客户端, 10秒后重试: {ex.Message}");
-                        Thread.Sleep(10000);
+                        await Task.Delay(10000);
                     }
                 }
             }
@@ -472,7 +494,13 @@ namespace VtsuruEventFetcher.Net
         }
         public void AddEvent(string e)
         {
-            _events.Add(e);
+#if DEBUG
+            Log($"[DEBUG] 收到弹幕: {e}");
+#endif
+            lock (_eventsLock)
+            {
+                _events.Add(e);
+            }
         }
 
         public async Task StopAsync()
