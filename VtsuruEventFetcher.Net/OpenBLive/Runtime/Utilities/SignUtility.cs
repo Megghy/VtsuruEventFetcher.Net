@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 #if NET5_0_OR_GREATER
 using System.Net;
+using System.Net.Http;
 #elif UNITY_2020_3_OR_NEWER
 using UnityEngine.Networking;
 #endif
@@ -97,6 +98,26 @@ namespace OpenBLive.Runtime.Utilities
             return builder.ToString();
         }
 #if NET5_0_OR_GREATER
+        public static void SetReqHeader(HttpRequestMessage req, string jsonParam, string cookie = null)
+        {
+            var sortDic = OrderAndMd5(jsonParam);
+            var auth = CalculateSignature(sortDic);
+            foreach (var item in sortDic)
+            {
+                req.Headers.Add(item.Key, item.Value);
+            }
+
+            req.Headers.Add("Authorization", auth);
+            req.Headers.Accept.ParseAdd("application/json");
+            if (cookie != null)
+            {
+                req.Headers.Add("Cookie", cookie);
+            }
+
+            req.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(jsonParam));
+            req.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        }
+
         public static void SetReqHeader(HttpWebRequest req, string jsonParam, string cookie = null)
         {
             var sortDic = OrderAndMd5(jsonParam);

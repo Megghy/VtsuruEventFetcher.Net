@@ -14,7 +14,7 @@ namespace BDanMuLib
         {
 
         }
-        private Stream? stream;
+        private Stream stream;
         public async Task<PipeReader> ConnectAsync(string host, int port, CancellationToken cancellationToken)
         {
             if (this.stream is not null)

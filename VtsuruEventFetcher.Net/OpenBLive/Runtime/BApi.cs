@@ -1,10 +1,9 @@
 ﻿using System.Text;
 using Newtonsoft.Json;
+using System.Net.Http;
 using OpenBLive.Runtime.Data;
 using OpenBLive.Runtime.Utilities;
-#if NET5_0_OR_GREATER
-using System.Net;
-#elif UNITY_2020_3_OR_NEWER
+#if UNITY_2020_3_OR_NEWER
 using UnityEngine.Networking;
 #endif
 
@@ -100,25 +99,15 @@ namespace OpenBLive.Runtime
             string cookie = null)
         {
 #if NET5_0_OR_GREATER
-            string result = "";
-            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
-            req.Method = method;
-
+            using var client = new HttpClient();
+            using var request = new HttpRequestMessage(new HttpMethod(method), url);
             if (param != null)
             {
-                SignUtility.SetReqHeader(req, param, cookie);
+                SignUtility.SetReqHeader(request, param, cookie);
             }
 
-            HttpWebResponse httpResponse = (HttpWebResponse)(await req.GetResponseAsync());
-            Stream stream = httpResponse.GetResponseStream();
-
-            if (stream != null)
-            {
-                using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
-                result = await reader.ReadToEndAsync();
-            }
-
-            return result;
+            using var response = await client.SendAsync(request);
+            return await response.Content.ReadAsStringAsync();
 
 #elif UNITY_2020_3_OR_NEWER
             UnityWebRequest webRequest = new UnityWebRequest(url);

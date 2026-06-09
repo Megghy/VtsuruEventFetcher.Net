@@ -75,7 +75,6 @@ namespace BDanMuLib
         };
 
         private static DateTime _lastGetCookie = DateTime.MinValue;
-        private static DateTime? _cookieExpireDate;
         private static TimeSpan _getCookieTime = new(0, 1, 0);
         private static string _buvidCookie = "";
 
@@ -171,7 +170,6 @@ namespace BDanMuLib
         /// <returns>连接是否成功</returns>
         public async Task<bool> ConnectAsync(WebProxy proxy = null, CancellationToken cancel = default)
         {
-            IPAddress ip = null;
             try
             {
                 if (_isConnected)
@@ -258,13 +256,15 @@ namespace BDanMuLib
                 {
                     ClientType.Tcp => new TcpDanmuConnection(),
                     ClientType.Ws => new WSDanmuConnection(proxy),
-                    ClientType.Wss => new WSSDanmuConnection(proxy)
+                    ClientType.Wss => new WSSDanmuConnection(proxy),
+                    _ => throw new InvalidOperationException($"Unsupported client type: {Type}")
                 };
                 _reader = await _connection.ConnectAsync(_chatHost, Type switch
                 {
                     ClientType.Tcp => _chatPort,
                     ClientType.Ws => _wsPort,
                     ClientType.Wss => _wssPort,
+                    _ => throw new InvalidOperationException($"Unsupported client type: {Type}")
                 }, cancel);
 
                 if (!await SendJoinRoomAsync(_roomId, _uid, token))
@@ -888,7 +888,7 @@ namespace BDanMuLib
 
             if (_reconnectOnFaid)
             {
-                ConnectAsync();
+                _ = ConnectAsync();
             }
             else
             {
