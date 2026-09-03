@@ -248,11 +248,17 @@ namespace VtsuruEventFetcher.Net
                     {
                         _hub = null;
                     }
-                    Log($"被服务端断开连接: {e}, 为保证可用性将于30s后再次尝试连接");
 
-                    _client?.Dispose();
+                    var isTokenFatal = e.Contains("Token") || e.Contains("未认证");
+                    if (isTokenFatal)
+                    {
+                        _client?.Dispose();
+                    }
 
-                    await Task.Delay(30000);
+                    var retryDelay = isTokenFatal ? 30000 : 5000;
+                    Log($"被服务端断开连接: {e}, 将于 {retryDelay / 1000}s 后尝试重新连接");
+
+                    await Task.Delay(retryDelay);
                     _ = ConnectHub();
                 });
                 connection.On("Request", async (string url, string method, string body, bool useCookie) =>
@@ -295,7 +301,7 @@ namespace VtsuruEventFetcher.Net
                 string[] tempEvents;
                 lock (_eventsLock)
                 {
-                    tempEvents = _events.Take(30).ToArray();
+                    tempEvents = _events.Take(150).ToArray();
                 }
                 var model = new RequestUploadEvents(tempEvents, Errors, currentVersion, _osInfo, UsingCookie);
 
@@ -320,6 +326,7 @@ namespace VtsuruEventFetcher.Net
                     if (tempEvents.Length > 0)
                     {
                         Log($"[ADD EVENT] 已发送 {tempEvents.Length} 条事件");
+                        bool hasMore;
                         lock (_eventsLock)
                         {
                             var removeCount = Math.Min(tempEvents.Length, _events.Count);
@@ -327,6 +334,16 @@ namespace VtsuruEventFetcher.Net
                             {
                                 _events.RemoveRange(0, removeCount);
                             }
+                            hasMore = _events.Count > 0;
+                        }
+
+                        if (hasMore)
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(450);
+                                await SendEventAsync();
+                            });
                         }
                     }
                     var responseCode = resp.Message;
